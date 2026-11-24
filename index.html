@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drone Builder — ประกอบโดรนแล้วออกบิน</title>
+  <link rel="stylesheet" href="css/style.css?v=20261124e">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+  <!-- Top Application Header (Hidden on Home Screen, shown on Tabs & Free Flight) -->
+  <header class="app-header home-hidden" id="main-app-header">
+    <div class="logo-area" id="btn-logo-home" title="กลับหน้าแรก">
+      <div class="logo-icon-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="3"></circle>
+          <circle cx="18" cy="6" r="3"></circle>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="18" cy="18" r="3"></circle>
+          <path d="M8.5 8.5L15.5 15.5M15.5 8.5L8.5 15.5"></path>
+          <rect x="9.5" y="9.5" width="5" height="5" rx="1.2" fill="currentColor"></rect>
+        </svg>
+      </div>
+      <div class="logo-text">
+        <h1>DRONE BUILDER</h1>
+        <p>ASSEMBLE · FLY · LEARN</p>
+      </div>
+    </div>
+
+    <!-- Center Pill Navigation -->
+    <nav class="nav-tabs" id="main-nav-tabs">
+      <button class="nav-tab-btn active" data-screen="assembly">ประกอบ</button>
+      <button class="nav-tab-btn" data-screen="readiness">ตรวจความพร้อม</button>
+      <button class="nav-tab-btn" data-screen="missions">ออกบิน</button>
+      <button class="nav-tab-btn" data-screen="lessons">บทเรียน 6 หน่วย</button>
+      <button class="nav-tab-btn" id="btn-nav-thai-law" type="button">⚖️ กฎหมายไทย</button>
+      <button class="nav-tab-btn" data-screen="quiz">แบบทดสอบ</button>
+    </nav>
+
+    <!-- Right Header Actions -->
+    <div class="header-actions">
+      <button class="btn-header-action" id="btn-top-freeflight">✈ บินอิสระ</button>
+      <button class="btn-header-action" id="btn-top-reset">↺ คืนค่าเริ่มต้น</button>
+      <button class="btn-header-action" id="btn-top-home">🏠 หน้าแรก</button>
+    </div>
+  </header>
+
+  <!-- ========================================================
+       SCREEN 1: HOME LANDING OVERLAY (Figma Redesign + Live 3D Drone)
+       ======================================================== -->
+  <section class="screen-view active" id="screen-home">
+    <div class="home-screen">
+      <div class="home-topbar">
+        <div class="home-brand">
+          <div class="home-brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="6" cy="6" r="3"></circle>
+              <circle cx="18" cy="6" r="3"></circle>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="18" r="3"></circle>
+              <path d="M8.5 8.5L15.5 15.5M15.5 8.5L8.5 15.5"></path>
+              <rect x="9.5" y="9.5" width="5" height="5" rx="1.2" fill="currentColor"></rect>
+            </svg>
+          </div>
+          <div class="home-brand-text">
+            <h1>DRONE BUILDER</h1>
+            <p>ASSEMBLE · FLY · LEARN &nbsp;|&nbsp; 3D EDUCATIONAL SIMULATOR</p>
+          </div>
+        </div>
+        <div class="home-topbar-right">
+          <button type="button" class="home-icon-btn" id="btn-home-sound" title="เปิด/ปิดเสียงจำลองการบิน">🔊</button>
+          <div class="home-sys-pill">
+            <span class="home-sys-dot"></span>
+            <span>ระบบ 3D พร้อมใช้งาน</span>
+          </div>
+          <div class="home-free-pill">เล่นฟรี · ไม่ต้องติดตั้ง</div>
+        </div>
+      </div>
+
+      <div class="home-content-grid">
+        <!-- Left Hero Area -->
+        <div class="home-left-col">
+          <div class="home-hero-preview">
+            <div id="home-canvas-viewport" class="home-preview-canvas"></div>
+            <!-- Live Telemetry Overlay Chips -->
+            <div class="home-telemetry-strip">
+              <span class="telem-chip cyan">ALT 1.5 ม.</span>
+              <span class="telem-chip orange" id="home-telem-tw">T/W 2.8x</span>
+              <span class="telem-chip green" id="home-telem-bat">4S LiPo 100%</span>
+              <span class="telem-chip white">GPS 14 SAT</span>
+            </div>
+            <!-- Bottom Glass Caption Bar -->
+            <div class="home-preview-badge">
+              <b>ฉากจริงในเกม 3D</b>
+              <span>ลานบิน · โรงเก็บเครื่องบิน · หุบเขาหิมะ · ทะเลสาบ · หมู่บ้าน</span>
+            </div>
+          </div>
+
+          <div class="home-hero-text">
+            <h1 class="home-title">
+              ประกอบโดรน <span>แล้วบินจริง</span>
+            </h1>
+            <p class="home-subtitle">
+              เรียนรู้โครงสร้างโดรน 12 ชิ้นส่วนจริง (รวม RX · LiDAR · ถังพ่นปุ๋ย · ร่มชูชีพ) คำนวณแรงยก น้ำหนัก และเวลาบินแบบ Real-time พร้อมฝึกบิน 3 มิติฟิสิกส์ 6-DOF และแบบทดสอบวัดผลก่อน–หลังเรียน
+            </p>
+          </div>
+
+          <!-- 3 Highlight Metric Cards -->
+          <div class="home-stats-row">
+            <div class="home-stat-card">
+              <strong class="orange">12 ชิ้นส่วนจริง</strong>
+              <span>ฟิสิกส์ 6-DOF · แต่งสี · พ่นปุ๋ย</span>
+            </div>
+            <div class="home-stat-card law-stat-clickable" id="btn-home-thai-law" title="คลิกเพื่อเปิดบทเรียนกฎหมายโดรนประเทศไทย (หน่วยที่ 6)">
+              <strong class="cyan">⚖️ กฎหมายโดรนไทย</strong>
+              <span>กสทช. · กพท. (CAAT) · 90 ม. · 9 กม.</span>
+            </div>
+            <div class="home-stat-card">
+              <strong class="green">Pre/Post 14 ข้อ</strong>
+              <span>รวมข้อสอบกฎหมาย + ส่งออก CSV</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Mode Selection (Chronological Step 1 -> 2 -> 3 -> 4) -->
+        <div class="home-right-col">
+          <div class="home-mode-header">
+            <span class="home-mode-label">เส้นทางการเรียนรู้</span>
+            <span class="home-mode-count">เรียงตามลำดับ 1 → 4</span>
+          </div>
+
+          <!-- STEP 1: Lessons & Pre/Post Test -->
+          <div class="home-mode-card" id="btn-home-lessons">
+            <div class="home-mode-card-left">
+              <div class="home-mode-icon green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2V4z"></path>
+                  <path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7V4z"></path>
+                </svg>
+              </div>
+              <div class="home-mode-info">
+                <div class="home-mode-title-row">
+                  <h3>บทเรียน 6 หน่วย · กฎหมายไทย &amp; แบบทดสอบ</h3>
+                  <span class="mode-tag green">ขั้นที่ 1 · PRE/POST</span>
+                </div>
+                <p>ทำ Pre-test · ศึกษา 6 หน่วยเน้นกฎหมายไทย (กสทช./กพท.) · Post-test 14 ข้อ &amp; CSV</p>
+                <div class="mode-progress-text" id="home-progress-lessons">Pre-test: ยังไม่ทำ · Post-test: ยังไม่ทำ</div>
+              </div>
+            </div>
+            <div class="home-mode-arrow">→</div>
+          </div>
+
+          <!-- STEP 2: Assembly Mode (Featured) -->
+          <div class="home-mode-card featured" id="btn-home-assembly">
+            <div class="home-mode-card-left">
+              <div class="home-mode-icon orange">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                </svg>
+              </div>
+              <div class="home-mode-info">
+                <div class="home-mode-title-row">
+                  <h3>โหมดประกอบโดรน</h3>
+                  <span class="mode-tag orange">ขั้นที่ 2 · แนะนำ</span>
+                </div>
+                <p>เลือกชิ้นส่วน 12 จุด (รวม RX · LiDAR · ถังปุ๋ย · กันชน/ร่ม) ดูค่า T/W · เวลาบิน · ราคา</p>
+                <div class="mode-progress-text" id="home-progress-assembly">ติดตั้งแล้ว 12/12 ชิ้น · พร้อมบิน</div>
+              </div>
+            </div>
+            <div class="home-mode-arrow">→</div>
+          </div>
+
+          <!-- STEP 3: Free Flight -->
+          <div class="home-mode-card" id="btn-home-freeflight">
+            <div class="home-mode-card-left">
+              <div class="home-mode-icon cyan">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"></path>
+                </svg>
+              </div>
+              <div class="home-mode-info">
+                <div class="home-mode-title-row">
+                  <h3>บินอิสระ (Free Flight)</h3>
+                  <span class="mode-tag cyan">ขั้นที่ 3 · 3D SIM</span>
+                </div>
+                <p>บินสำรวจแผนที่ใหญ่ ไม่มีเป้าหมาย ไม่จำกัดเวลา · ฝึกคุม 4 แกน</p>
+              </div>
+            </div>
+            <div class="home-mode-arrow">→</div>
+          </div>
+
+          <!-- STEP 4: Missions -->
+          <div class="home-mode-card" id="btn-home-missions">
+            <div class="home-mode-card-left">
+              <div class="home-mode-icon amber">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9"></circle>
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
+                </svg>
+              </div>
+              <div class="home-mode-info">
+                <div class="home-mode-title-row">
+                  <h3>ภารกิจการบิน (3 ด่าน)</h3>
+                  <span class="mode-tag amber">ขั้นที่ 4 · MISSION</span>
+                </div>
+                <p>ฝึกบินพื้นฐาน · สำรวจแนวสันเขา · ตรวจเสาสื่อสาร 45 ม.</p>
+                <div class="mode-progress-text" id="home-progress-missions">ผ่านภารกิจแล้ว 0/3 ด่าน</div>
+              </div>
+            </div>
+            <div class="home-mode-arrow">→</div>
+          </div>
+
+          <!-- Keyboard & Gamepad Quick Reference Card -->
+          <div class="home-cheatsheet-card">
+            <div class="home-cheatsheet-header">
+              <span>การควบคุม 4 แกน (Mode 2)</span>
+              <span class="gamepad-badge" id="home-gamepad-status">🎮 ยังไม่ได้เสียบจอย (รองรับ Mode 2)</span>
+            </div>
+            <div class="home-cheatsheet-row">
+              <span class="key-pill">W / S</span>
+              <span>เดินหน้า–ถอยหลัง</span>
+              <span class="key-pill">A / D</span>
+              <span>หมุนซ้าย–ขวา</span>
+              <span class="key-pill">Space / Shift</span>
+              <span>ขึ้น–ลง</span>
+            </div>
+            <div class="home-cheatsheet-row">
+              <span class="key-pill">Q / E</span>
+              <span>เอียงซ้าย–ขวา</span>
+              <span class="key-pill">C</span>
+              <span>สลับกล้อง FPV</span>
+              <span class="key-pill">R</span>
+              <span>กลับฐาน</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 2: 1 ประกอบ — 3-COLUMN ASSEMBLY WORKBENCH
+       ======================================================== -->
+  <section class="screen-view" id="screen-assembly">
+    <div class="assembly-screen">
+      <!-- Left HUD (288px) -->
+      <aside class="assembly-left-sidebar">
+        <!-- Card 1: Performance Summary -->
+        <div class="card-summary">
+          <div class="card-summary-title">สรุปชุดที่ประกอบ</div>
+          <div class="stat-row">
+            <span class="stat-label">น้ำหนักรวม</span>
+            <span class="stat-value" id="stat-weight">0 ก.</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">แรงยกทั้งหมด</span>
+            <span class="stat-value" id="stat-thrust">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">แรงยก / น้ำหนัก</span>
+            <span class="stat-value highlight" id="stat-tw">—</span>
+          </div>
+          <div class="tw-progress-bar">
+            <div class="tw-progress-fill" id="tw-progress-fill"></div>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">เวลาบินประมาณ</span>
+            <span class="stat-value" id="stat-flight-time">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">กระแสที่ใช้</span>
+            <span class="stat-value" id="stat-current">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">ราคารวม</span>
+            <span class="stat-value" id="stat-price">฿0</span>
+          </div>
+        </div>
+
+        <!-- Card 2: Compatibility -->
+        <div class="card-summary">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="card-summary-title">ความเข้ากันได้</span>
+            <span class="badge-tag warning" id="badge-compatibility">ยังประกอบไม่ครบ</span>
+          </div>
+          <div class="compat-box" id="text-verify-result">
+            ยังตรวจไม่ครบ — ติดตั้งให้ครบ 12 ชิ้นก่อน
+          </div>
+        </div>
+
+        <!-- Card 3: Flight Readiness -->
+        <div class="card-summary">
+          <div class="card-summary-title">พร้อมออกบินหรือยัง</div>
+          <div class="ready-checklist-mini" id="text-flight-ready">
+            <div class="fail-line">✕ ต้องประกอบให้ครบ 12 ชิ้นก่อน (ขาด 12 ชิ้น)</div>
+          </div>
+        </div>
+
+        <!-- Card 4: Quick Comparison Presets -->
+        <div class="card-summary">
+          <div class="card-summary-title">ชุดตัวอย่าง (กดเทียบสเปกทันที)</div>
+          <div class="preset-btn-row">
+            <button type="button" class="btn-preset-chip" data-preset="default_aerial">📷 ถ่ายภาพ</button>
+            <button type="button" class="btn-preset-chip" data-preset="fpv_racer">⚡ FPV</button>
+            <button type="button" class="btn-preset-chip" data-preset="heavy_survey">📦 สำรวจหนัก</button>
+            <button type="button" class="btn-preset-chip" data-preset="agri_sprayer">🌾 พ่นปุ๋ยเกษตร</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center 3D Stage -->
+      <main class="assembly-center-area">
+        <div class="workbench-header-bar">
+          <div class="view-controls">
+            <button class="btn-view active" id="btn-view-iso">มุมเฉียง</button>
+            <button class="btn-view" id="btn-view-top">ผังบน</button>
+            <button class="btn-view" id="btn-view-rear">มุมหลัง</button>
+            <button class="btn-view" id="btn-view-exploded">แยกชิ้นส่วน</button>
+            <button class="btn-view" id="btn-workbench-spin" title="ทดสอบเร่งรอบมอเตอร์และใบพัดบนโต๊ะประกอบ">🌀 เทสต์มอเตอร์</button>
+            <button class="btn-view" id="btn-toggle-callouts">🏷 แสดงป้ายทั้งหมด</button>
+            <button class="btn-view" id="btn-toggle-paint">🎨 แต่งสีโดรน</button>
+          </div>
+        </div>
+
+        <div class="workbench-canvas-container" id="workbench-canvas"></div>
+
+        <!-- Floating Real-Time Drone Paint & Livery Studio -->
+        <div class="paint-studio-panel hidden" id="paint-studio-panel">
+          <div class="paint-studio-header">
+            <span class="paint-studio-title">🎨 แต่งสีโดรน</span>
+            <div class="paint-studio-header-actions">
+              <button type="button" class="btn-paint-mini" id="btn-paint-reset" title="คืนค่าสีเริ่มต้น">⟲ คืนค่า</button>
+              <button type="button" class="btn-paint-mini" id="btn-paint-close" title="ปิดหน้าต่างแต่งสี">✕</button>
+            </div>
+          </div>
+
+          <div class="paint-section-label">ธีมสีสำเร็จรูป (Livery)</div>
+          <div class="paint-livery-grid" id="paint-livery-grid"></div>
+
+          <div class="paint-section-label">พื้นผิวโครงโดรน (Finish)</div>
+          <div class="paint-finish-row" id="paint-finish-row">
+            <button type="button" class="btn-finish-chip active" data-finish="carbon">คาร์บอน 3K</button>
+            <button type="button" class="btn-finish-chip" data-finish="matte">ด้าน</button>
+            <button type="button" class="btn-finish-chip" data-finish="gloss">เงา</button>
+            <button type="button" class="btn-finish-chip" data-finish="metallic">เมทัลลิก</button>
+          </div>
+
+          <div class="paint-section-label">ปรับสีแต่ละส่วน (Real-Time)</div>
+          <div class="paint-zones-list" id="paint-zones-list"></div>
+        </div>
+
+        <!-- 3D Callouts Overlay (A–L) & Interactive Hover Tooltip -->
+        <div class="callout-layer" id="workbench-callouts"></div>
+        <div class="drone-hover-tooltip" id="workbench-hover-tooltip"></div>
+
+        <!-- Center Bottom Status Toast -->
+        <div class="stage-toast-pill" id="stage-toast-pill" style="display: none;">
+          แยกชิ้นส่วน — เห็นตำแหน่งจริงของทุกชิ้น
+        </div>
+
+        <button class="btn-next-step-floating" id="btn-next-step-float">
+          01 ติดตั้ง โครงโดรน
+        </button>
+      </main>
+
+      <!-- Right Sidebar: 12 Parts Slot List -->
+      <aside class="assembly-right-sidebar">
+        <div class="parts-header-info">
+          <div class="parts-header-top">
+            <span class="install-progress" id="val-installed-count">ติดตั้งแล้ว 0 / 12</span>
+            <span class="next-hint" id="val-next-part">ครบทุกชิ้น</span>
+          </div>
+          <div class="parts-progress-track">
+            <div class="parts-progress-fill" id="parts-progress-fill"></div>
+          </div>
+        </div>
+        <div class="parts-list" id="parts-list-container"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 3: 2 ตรวจความพร้อม — PRE-FLIGHT CHECK
+       ======================================================== -->
+  <section class="screen-view" id="screen-readiness">
+    <div class="readiness-screen">
+      <div class="section-title-box">
+        <h2>ตรวจความพร้อมก่อนบิน</h2>
+        <p>ระบบตรวจชุดที่ประกอบกับความต้องการของแต่ละภารกิจ</p>
+      </div>
+
+      <div class="readiness-cards-grid" id="readiness-cards-container"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 4: 3 ออกบิน — MISSION SELECTION
+       ======================================================== -->
+  <section class="screen-view" id="screen-missions">
+    <div class="mission-screen">
+      <div class="section-title-box">
+        <h2>เลือกภารกิจ</h2>
+        <p>แต่ละภารกิจทดสอบชิ้นส่วนต่างกัน — เลือกให้ตรงกับชุดที่ประกอบ</p>
+      </div>
+
+      <div class="mission-section-label">ออกบินอิสระ — ซ้อมบังคับก่อนทำภารกิจ</div>
+
+      <div class="hero-mission-card" id="btn-launch-free">
+        <div class="mission-tag-muted">ไม่มีเป้าหมาย · ไม่จำกัดเวลา</div>
+        <div class="hero-mission-title">บินอิสระ <small>FREE FLIGHT</small></div>
+        <div class="hero-mission-desc">ไม่มีเป้าหมาย ไม่มีเวลาจำกัด — บินสำรวจพื้นที่ได้จนกว่าแบตจะหมด หรือกดลงจอดเอง</div>
+        <span class="btn-launch-orange">▶ ออกบินอิสระเลย</span>
+      </div>
+
+      <div class="mission-section-label" style="margin-top: 6px;">ภารกิจที่วัดผลชุดที่ประกอบ</div>
+
+      <div class="mission-cards-grid" id="mission-subcards-container"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 5: 3D FLIGHT SIMULATOR
+       ======================================================== -->
+  <section class="screen-view" id="screen-simulator">
+    <div class="flight-sim-screen">
+      <div class="flight-canvas-container" id="flight-sim-canvas"></div>
+
+      <div class="flight-hud-overlay">
+        <div class="hud-top-bar">
+          <div class="hud-objective-card">
+            <h3 id="hud-mission-title">บินอิสระ</h3>
+            <div class="drone-led-indicator" id="hud-led-status" title="สัญลักษณ์สถานะไฟ LED ของโดรน">
+              <span class="led-dot standby" id="hud-led-dot"></span>
+              <span id="hud-led-text">🟡 STANDBY — ยังไม่ ARM</span>
+            </div>
+            <span class="hud-fps-badge" id="hud-fps-badge" title="เฟรมเรตจริง (Frames Per Second)">60 FPS</span>
+            <p id="hud-mission-desc"></p>
+          </div>
+
+          <div class="hud-telemetry-strip">
+            <div class="telemetry-tile">
+              <span class="telemetry-label">ความสูง</span>
+              <span class="telemetry-value" id="hud-alt-val">0.0 ม.</span>
+            </div>
+            <div class="telemetry-tile">
+              <span class="telemetry-label">ความเร็ว</span>
+              <span class="telemetry-value" id="hud-speed-val">0 กม./ชม.</span>
+            </div>
+            <div class="telemetry-tile">
+              <span class="telemetry-label" id="hud-time-label">เวลาบิน</span>
+              <span class="telemetry-value" id="hud-time-val">00:00</span>
+            </div>
+            <div class="telemetry-tile">
+              <span class="telemetry-label">จุดสำรวจ</span>
+              <span class="telemetry-value" id="hud-checkpoint-val">—</span>
+            </div>
+            <div class="telemetry-tile">
+              <span class="telemetry-label">แบตเตอรี่</span>
+              <span class="telemetry-value" id="hud-bat-val">100%</span>
+              <div class="battery-bar-container">
+                <div class="battery-bar-fill" id="hud-bat-bar"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hud-actions-right">
+            <button class="btn-header-action btn-start-stop start-ready" id="btn-hud-start-stop" title="สตาร์ท / ดับมอเตอร์ หรือลงจอดอัตโนมัติ (ปุ่ม B)">▶ START</button>
+            <button class="btn-header-action btn-auto-flight" id="btn-hud-auto-takeoff" title="บินขึ้นอัตโนมัติ 3 ม. (T) / ตัดมอเตอร์ฉุกเฉินเมื่อลอยกลางอากาศ (X×2)">🛫 บินขึ้น (T)</button>
+            <button class="btn-header-action" id="btn-hud-rate-mode" title="สลับความนุ่มนวลการบังคับ: นุ่มสมดุล / นุ่มนวล Cine / สปอร์ต (ปุ่ม G)">⚖️ นุ่มสมดุล (G)</button>
+            <button class="btn-header-action" id="btn-hud-graphics" title="สลับระดับกราฟิกเพื่อความลื่นไหล: สมดุล / ลื่นสุด (60 FPS) / คมชัด">⚖️ สมดุล</button>
+            <button class="btn-header-action" id="btn-toggle-camera">📷 FPV</button>
+            <button class="btn-header-action" id="btn-toggle-sound">🔊</button>
+            <button class="btn-header-action primary" id="btn-hud-land">📋 จบเที่ยวบิน</button>
+            <button class="btn-header-action" id="btn-hud-home">← หน้าแรก</button>
+          </div>
+        </div>
+
+        <div class="fpv-crosshair-hud hidden" id="fpv-crosshair-hud">
+          <div class="fpv-wing-left"></div>
+          <div class="fpv-center-bracket"></div>
+          <div class="fpv-wing-right"></div>
+        </div>
+
+        <div class="hud-bottom-bar">
+          <div class="flight-controller-osd" id="rc-widget-osd">
+            <div class="rc-top-row">
+              <div class="artificial-horizon-box">
+                <div class="horizon-line" id="horizon-line"></div>
+                <div class="horizon-center-cross"></div>
+              </div>
+              <div class="osd-status-text">
+                <span id="osd-input-device">KEYBOARD</span>
+                <span id="osd-status-text">DISARM — ล็อกสติ๊ก</span>
+              </div>
+            </div>
+
+            <div class="osd-controls-row">
+              <div class="virtual-joystick-widget" title="ซ้าย: แรงยก + หัน">
+                <div class="joystick-thumb" id="joystick-left-thumb"></div>
+              </div>
+              <div class="osd-btn-center">
+                <button class="btn-arm-drone" id="btn-arm-toggle">⏻ ARM</button>
+                <button class="btn-arm-drone" id="btn-flight-reset">⟲ RESET</button>
+              </div>
+              <div class="virtual-joystick-widget" title="ขวา: หน้า + เลื่อนข้าง">
+                <div class="joystick-thumb" id="joystick-right-thumb"></div>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--muted);">
+              <span>ซ้าย · แรงยก + หัน</span>
+              <span>ขวา · หน้า + เลื่อนข้าง</span>
+            </div>
+          </div>
+
+          <div class="hud-center-pill">
+            B สตาร์ท/ดับ · T บินขึ้น · L ลงจอด · G ปรับความนุ่มนวล · X×2 ตัดฉุกเฉิน · W/S/A/D/Q/E · Space/Shift · H GPS · R กลับฐาน · F พ่นปุ๋ย
+          </div>
+
+          <div style="width: 140px;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 6: 4 บทเรียน — 5 LEARNING UNITS (Matches Project Scope 1.1–1.6)
+       ======================================================== -->
+  <section class="screen-view" id="screen-lessons">
+    <div class="lessons-screen">
+      <div class="lessons-top-row">
+        <div class="section-title-box">
+          <h2>บทเรียนอากาศยานไร้คนขับ (6 หน่วยการเรียนรู้ · เน้นกฎหมายไทย)</h2>
+          <p>ครอบคลุมพื้นฐาน ประเภทโดรน 4 แบบ ส่วนประกอบ 12 ชิ้น หลักการบิน ไฟ LED และกฎหมายโดรนไทย (กสทช. &amp; กพท. / CAAT)</p>
+        </div>
+        <button class="btn-header-action primary" id="btn-lessons-go-quiz">📝 ไปทำแบบทดสอบ (Pre / Post-test) →</button>
+      </div>
+
+      <div class="unit-tabs-bar" id="learning-unit-tabs"></div>
+
+      <div class="unit-content-body" id="learning-unit-content"></div>
+
+      <div class="lesson-rows-container" id="lesson-rows-container" style="display: none;"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 7: 5 แบบทดสอบ — PRE-TEST / POST-TEST & COMPARISON (Scope 2.8, 3.4)
+       ======================================================== -->
+  <section class="screen-view" id="screen-quiz">
+    <div class="quiz-screen">
+      <div class="lessons-top-row">
+        <div class="section-title-box">
+          <h2>แบบทดสอบก่อนเรียนและหลังเรียน (Pre-test / Post-test)</h2>
+          <p>ประเมินความรู้ครอบคลุมทั้ง 6 หน่วยการเรียนรู้ (14 ข้อ · รวมกฎหมายโดรนไทย) พร้อมเปรียบเทียบพัฒนาการคะแนนอัตโนมัติ</p>
+        </div>
+        <div class="quiz-mode-switch">
+          <button class="btn-header-action primary" id="btn-quiz-pre">ทำแบบทดสอบก่อนเรียน (Pre-test)</button>
+          <button class="btn-header-action" id="btn-quiz-post">ทำแบบทดสอบหลังเรียน (Post-test)</button>
+          <button class="btn-header-action" id="btn-quiz-compare">📊 ผลเปรียบเทียบคะแนน</button>
+          <button class="btn-header-action" id="btn-quiz-eval">⭐ แบบประเมิน (0–5)</button>
+        </div>
+      </div>
+
+      <!-- Score Comparison Dashboard -->
+      <div class="quiz-compare-panel" id="quiz-compare-panel"></div>
+
+      <!-- Active Quiz Questions Container -->
+      <div class="quiz-questions-box" id="quiz-questions-box"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       DEBRIEF MODAL
+       ======================================================== -->
+  <div class="modal-overlay" id="modal-debrief">
+    <div class="debrief-card">
+      <div class="debrief-subtitle" id="debrief-mode-sub">จบเที่ยวบินอิสระ</div>
+      <div class="debrief-title" id="debrief-main-title">บินอิสระ</div>
+
+      <div class="debrief-stats-row">
+        <div class="debrief-stat-box">
+          <div class="debrief-stat-val" id="debrief-time-val">00:00</div>
+          <div class="debrief-stat-lbl">เวลา</div>
+        </div>
+        <div class="debrief-stat-box">
+          <div class="debrief-stat-val" id="debrief-bat-val">100%</div>
+          <div class="debrief-stat-lbl">แบตเหลือ</div>
+        </div>
+        <div class="debrief-stat-box">
+          <div class="debrief-stat-val" id="debrief-alt-val">0 ม.</div>
+          <div class="debrief-stat-lbl">ความสูงสุด</div>
+        </div>
+      </div>
+
+      <div class="debrief-advice-box">
+        <div class="advice-title">เรียนรู้จากเที่ยวบินนี้</div>
+        <div class="advice-text" id="debrief-advice-text"></div>
+      </div>
+
+      <div class="debrief-actions-row">
+        <button class="btn-modal-action" id="btn-debrief-retry">บินอีกรอบ</button>
+        <button class="btn-modal-action primary" id="btn-debrief-missions">ไปทำภารกิจ →</button>
+        <button class="btn-modal-action" id="btn-debrief-edit">กลับไปแก้ชุด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================
+       PART PICKER DRAWER MODAL (Matches step_4_shot_1)
+       ======================================================== -->
+  <div class="modal-overlay" id="modal-part-selector">
+    <div class="debrief-card part-selector-modal">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+        <div>
+          <div class="part-modal-kicker" id="part-modal-kicker">01 · Frame · ขั้นถัดไป</div>
+          <div class="debrief-title" id="part-modal-title">โครงโดรน</div>
+        </div>
+        <button style="background: #1b1e28; border: 1px solid #2e3342; border-radius: 8px; width: 30px; height: 30px; color: #b4b4b4; font-size: 14px;" id="btn-close-part-modal">✕</button>
+      </div>
+      <div class="part-modal-lesson-box" id="part-modal-lesson"></div>
+      <div class="part-options-list" id="part-modal-options-list"></div>
+      <button class="btn-install-sticky" id="btn-confirm-install-part">ติดตั้งชิ้นนี้</button>
+    </div>
+  </div>
+
+  <script src="js/drone-data.js?v=20261124e"></script>
+  <script src="js/learning-data.js?v=20261124e"></script>
+  <script src="js/drone-model.js?v=20261124e"></script>
+  <script src="js/flight-sim.js?v=20261124e"></script>
+  <script src="js/app.js?v=20261124e"></script>
+</body>
+</html>
