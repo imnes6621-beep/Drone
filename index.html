@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Drone Builder — ประกอบโดรนแล้วออกบิน</title>
-  <link rel="stylesheet" href="css/style.css?v=20261124e">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=20261126i">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -30,18 +33,24 @@
       </div>
     </div>
 
-    <!-- Center Pill Navigation -->
+    <!-- Center Pill Navigation (Hidden until all 5 mandatory units are passed) -->
     <nav class="nav-tabs" id="main-nav-tabs">
       <button class="nav-tab-btn active" data-screen="assembly">ประกอบ</button>
       <button class="nav-tab-btn" data-screen="readiness">ตรวจความพร้อม</button>
       <button class="nav-tab-btn" data-screen="missions">ออกบิน</button>
-      <button class="nav-tab-btn" data-screen="lessons">บทเรียน 6 หน่วย</button>
+      <button class="nav-tab-btn" data-screen="lessons">บทเรียน 5 หน่วย</button>
       <button class="nav-tab-btn" id="btn-nav-thai-law" type="button">⚖️ กฎหมายไทย</button>
       <button class="nav-tab-btn" data-screen="quiz">แบบทดสอบ</button>
     </nav>
 
+    <!-- Locked Mandatory Course Status Strip (Shown ONLY before passing all 5 units) -->
+    <div class="course-lock-header-bar" id="course-lock-header-bar">
+      <span class="course-lock-badge" id="course-lock-badge">🔒 หลักสูตรบังคับก่อนเข้าเกม · ผ่านแล้ว 0/5 หน่วย</span>
+      <span class="course-lock-step-pill" id="course-lock-step-pill">หน่วยที่ 1 · สอบก่อนเรียน (10 ข้อ)</span>
+    </div>
+
     <!-- Right Header Actions -->
-    <div class="header-actions">
+    <div class="header-actions" id="main-header-actions">
       <button class="btn-header-action" id="btn-top-freeflight">✈ บินอิสระ</button>
       <button class="btn-header-action" id="btn-top-reset">↺ คืนค่าเริ่มต้น</button>
       <button class="btn-header-action" id="btn-top-home">🏠 หน้าแรก</button>
@@ -49,10 +58,36 @@
   </header>
 
   <!-- ========================================================
-       SCREEN 1: HOME LANDING OVERLAY (Figma Redesign + Live 3D Drone)
+       SCREEN 0: MANDATORY 5-UNIT GUIDED LEARNING GATE
+       ======================================================== -->
+  <section class="screen-view" id="screen-course">
+    <div class="course-screen">
+      <div class="course-top-panel">
+        <div class="course-title-row">
+          <div>
+            <span class="course-kicker">📚 หลักสูตรบังคับก่อนเข้าสู่เกมจำลองการบิน · 5 หน่วยการเรียนรู้</span>
+            <h2 id="course-main-heading">กำลังเริ่มต้นหน่วยที่ 1: ความรู้พื้นฐานเกี่ยวกับอากาศยานไร้คนขับ</h2>
+          </div>
+          <div class="course-pass-rule-pill">
+            เกณฑ์ผ่านต่อหน่วย: <b>≥ 7 / 10 คะแนน</b>
+          </div>
+        </div>
+        <!-- 5-Unit Progress Roadmap -->
+        <div class="course-stepper" id="course-stepper"></div>
+        <!-- Current Unit 3-Stage Sub-Stepper (Pre-test -> Lesson -> Post-test) -->
+        <div class="course-substepper" id="course-substepper"></div>
+      </div>
+
+      <!-- Dynamic Stage Body (Pre-test / Lesson Content / Post-test / Grand Unlock) -->
+      <div class="course-stage-body" id="course-stage-body"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================
+       SCREEN 1: HOME LANDING OVERLAY (Centered Pre-Learning Welcome Gate -> Full Free-Play Dashboard once 5 units passed)
        ======================================================== -->
   <section class="screen-view active" id="screen-home">
-    <div class="home-screen">
+    <div class="home-screen home-locked-welcome" id="home-screen-root">
       <div class="home-topbar">
         <div class="home-brand">
           <div class="home-brand-icon">
@@ -76,7 +111,7 @@
             <span class="home-sys-dot"></span>
             <span>ระบบ 3D พร้อมใช้งาน</span>
           </div>
-          <div class="home-free-pill">เล่นฟรี · ไม่ต้องติดตั้ง</div>
+          <div class="home-free-pill" id="home-free-pill">หลักสูตรบังคับ 5 หน่วย</div>
         </div>
       </div>
 
@@ -114,22 +149,33 @@
               <strong class="orange">12 ชิ้นส่วนจริง</strong>
               <span>ฟิสิกส์ 6-DOF · แต่งสี · พ่นปุ๋ย</span>
             </div>
-            <div class="home-stat-card law-stat-clickable" id="btn-home-thai-law" title="คลิกเพื่อเปิดบทเรียนกฎหมายโดรนประเทศไทย (หน่วยที่ 6)">
+            <div class="home-stat-card law-stat-clickable" id="btn-home-thai-law" title="คลิกเพื่อเปิดบทเรียนกฎหมายโดรนประเทศไทย (หน่วยที่ 5)">
               <strong class="cyan">⚖️ กฎหมายโดรนไทย</strong>
               <span>กสทช. · กพท. (CAAT) · 90 ม. · 9 กม.</span>
             </div>
             <div class="home-stat-card">
-              <strong class="green">Pre/Post 14 ข้อ</strong>
-              <span>รวมข้อสอบกฎหมาย + ส่งออก CSV</span>
+              <strong class="green">Pre/Post 50 ข้อ</strong>
+              <span>5 หน่วย · ผ่าน ≥ 7/10 · CSV</span>
             </div>
+          </div>
+
+          <!-- Single Primary CTA Button (Visible ONLY before completing all 5 mandatory units) -->
+          <div class="home-start-learning-box" id="home-start-learning-box">
+            <button type="button" class="btn-home-start-learning" id="btn-home-start-learning">
+              <span id="btn-home-start-label">เริ่มเรียน</span>
+              <span class="btn-home-start-arrow" aria-hidden="true">→</span>
+            </button>
+            <p class="home-start-learning-note" id="home-start-learning-note">
+              เข้าสู่แบบทดสอบก่อนเรียน หน่วยที่ 1 (10 ข้อ) · เรียนและสอบผ่าน ≥ 7/10 ครบทั้ง 5 หน่วย เพื่อปลดล็อกโหมดเล่นอิสระ
+            </p>
           </div>
         </div>
 
         <!-- Right Mode Selection (Chronological Step 1 -> 2 -> 3 -> 4) -->
         <div class="home-right-col">
           <div class="home-mode-header">
-            <span class="home-mode-label">เส้นทางการเรียนรู้</span>
-            <span class="home-mode-count">เรียงตามลำดับ 1 → 4</span>
+            <span class="home-mode-label">โหมดการใช้งานอิสระ (ปลดล็อกแล้ว)</span>
+            <span class="home-mode-count">เลือกใช้งานได้ทุกโหมด</span>
           </div>
 
           <!-- STEP 1: Lessons & Pre/Post Test -->
@@ -143,11 +189,11 @@
               </div>
               <div class="home-mode-info">
                 <div class="home-mode-title-row">
-                  <h3>บทเรียน 6 หน่วย · กฎหมายไทย &amp; แบบทดสอบ</h3>
-                  <span class="mode-tag green">ขั้นที่ 1 · PRE/POST</span>
+                  <h3>ทบทวนบทเรียน 5 หน่วย · กฎหมายไทย &amp; ผลสอบ</h3>
+                  <span class="mode-tag green">✓ ผ่านครบ 5 หน่วย</span>
                 </div>
-                <p>ทำ Pre-test · ศึกษา 6 หน่วยเน้นกฎหมายไทย (กสทช./กพท.) · Post-test 14 ข้อ &amp; CSV</p>
-                <div class="mode-progress-text" id="home-progress-lessons">Pre-test: ยังไม่ทำ · Post-test: ยังไม่ทำ</div>
+                <p>ทบทวนเนื้อหา 5 หน่วย (รวม LED และกฎหมายไทย กสทช./กพท.) · ดูผล Pre/Post 50 ข้อ &amp; CSV</p>
+                <div class="mode-progress-text" id="home-progress-lessons">ผ่านครบทั้ง 5 หน่วยแล้ว</div>
               </div>
             </div>
             <div class="home-mode-arrow">→</div>
@@ -231,8 +277,10 @@
             <div class="home-cheatsheet-row">
               <span class="key-pill">Q / E</span>
               <span>เอียงซ้าย–ขวา</span>
-              <span class="key-pill">C</span>
+              <span class="key-pill">V</span>
               <span>สลับกล้อง FPV</span>
+              <span class="key-pill">N</span>
+              <span>ปรับแรงลม</span>
               <span class="key-pill">R</span>
               <span>กลับฐาน</span>
             </div>
@@ -270,6 +318,10 @@
           <div class="stat-row">
             <span class="stat-label">เวลาบินประมาณ</span>
             <span class="stat-value" id="stat-flight-time">—</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">เพดานบินสูงสุด</span>
+            <span class="stat-value" id="stat-max-alt">—</span>
           </div>
           <div class="stat-row">
             <span class="stat-label">กระแสที่ใช้</span>
@@ -431,20 +483,37 @@
 
       <div class="flight-hud-overlay">
         <div class="hud-top-bar">
-          <div class="hud-objective-card">
+          <div class="hud-objective-card" id="hud-objective-card">
             <h3 id="hud-mission-title">บินอิสระ</h3>
             <div class="drone-led-indicator" id="hud-led-status" title="สัญลักษณ์สถานะไฟ LED ของโดรน">
               <span class="led-dot standby" id="hud-led-dot"></span>
               <span id="hud-led-text">🟡 STANDBY — ยังไม่ ARM</span>
+            </div>
+            <div class="hud-signal-pill good" id="hud-signal-pill" title="สถานะความแรงคลื่นวิทยุ (RX) และจุดอับสัญญาณ (ต้นไม้ / อาคาร / โรงเก็บโลหะ / เสา 5G)">
+              <span class="signal-led-dot" id="hud-signal-dot"></span>
+              <span class="signal-bars" id="hud-signal-bars" aria-hidden="true">
+                <i class="active"></i><i class="active"></i><i class="active"></i><i class="active"></i>
+              </span>
+              <span id="hud-signal-text">RX 100%</span>
+            </div>
+            <div class="hud-wind-pill calm" id="hud-wind-pill" title="ทิศทางและความแรงลมจริง ณ ตำแหน่งโดรน (ลูกศรชี้ทิศทางที่ลมพัดโดรนไป · กด N ปรับระดับลม)">
+              <span class="wind-arrow" id="hud-wind-arrow" aria-hidden="true">➤</span>
+              <span id="hud-wind-text">0.6 ม./วิ</span>
             </div>
             <span class="hud-fps-badge" id="hud-fps-badge" title="เฟรมเรตจริง (Frames Per Second)">60 FPS</span>
             <p id="hud-mission-desc"></p>
           </div>
 
           <div class="hud-telemetry-strip">
-            <div class="telemetry-tile">
-              <span class="telemetry-label">ความสูง</span>
+            <div class="telemetry-tile" id="hud-alt-tile" title="ความสูงเหนือพื้น/หลังคาใต้ท้องโดรน (AGL) เทียบกับความสูงจากจุดปล่อย (Barometer Home ALT) — เพดานกฎหมายไทย ≤ 90 ม.">
+              <span class="telemetry-label">ความสูง (AGL)</span>
               <span class="telemetry-value" id="hud-alt-val">0.0 ม.</span>
+              <span class="telemetry-sub" id="hud-alt-sub">BARO · ฐาน 0.0ม.</span>
+            </div>
+            <div class="telemetry-tile sensor-tile" id="hud-sensor-tile" title="เซนเซอร์วัดระยะพื้น (Sonar / ToF) และระบบกันชน 360° LiDAR + mmWave Radar (ช่องที่ 10)">
+              <span class="telemetry-label" id="hud-sensor-label">LiDAR / Radar</span>
+              <span class="telemetry-value" id="hud-sensor-val">ไม่ได้ติด</span>
+              <span class="telemetry-sub" id="hud-sensor-sub">ติดเพิ่มที่ช่อง 10</span>
             </div>
             <div class="telemetry-tile">
               <span class="telemetry-label">ความเร็ว</span>
@@ -471,18 +540,97 @@
             <button class="btn-header-action btn-start-stop start-ready" id="btn-hud-start-stop" title="สตาร์ท / ดับมอเตอร์ หรือลงจอดอัตโนมัติ (ปุ่ม B)">▶ START</button>
             <button class="btn-header-action btn-auto-flight" id="btn-hud-auto-takeoff" title="บินขึ้นอัตโนมัติ 3 ม. (T) / ตัดมอเตอร์ฉุกเฉินเมื่อลอยกลางอากาศ (X×2)">🛫 บินขึ้น (T)</button>
             <button class="btn-header-action" id="btn-hud-rate-mode" title="สลับความนุ่มนวลการบังคับ: นุ่มสมดุล / นุ่มนวล Cine / สปอร์ต (ปุ่ม G)">⚖️ นุ่มสมดุล (G)</button>
+            <button class="btn-header-action" id="btn-hud-wind" title="สลับความแรงลม: ตามฉาก / ลมปานกลาง / ลมแรง / พายุลมกระโชก / ลมสงบ (ปุ่ม N)">🌬️ ลม (N)</button>
+            <button class="btn-header-action" id="btn-hud-failsafe" title="จำลองเซนเซอร์/สัญญาณขาดหายกลางทาง เพื่อให้โดรนคำนวณเส้นทาง (Breadcrumb + A*) บินกลับจุดเริ่มต้นอัตโนมัติ (ปุ่ม P)">📡 สัญญาณหาย (P)</button>
             <button class="btn-header-action" id="btn-hud-graphics" title="สลับระดับกราฟิกเพื่อความลื่นไหล: สมดุล / ลื่นสุด (60 FPS) / คมชัด">⚖️ สมดุล</button>
-            <button class="btn-header-action" id="btn-toggle-camera">📷 FPV</button>
+            <button class="btn-header-action" id="btn-toggle-camera" title="สลับมุมมองบุคคลที่ 1 (FPV กล้องติดโดรน) ↔ มุมมองบุคคลที่ 3 (ปุ่ม V)">📷 มุมมองที่ 3 (V)</button>
             <button class="btn-header-action" id="btn-toggle-sound">🔊</button>
             <button class="btn-header-action primary" id="btn-hud-land">📋 จบเที่ยวบิน</button>
             <button class="btn-header-action" id="btn-hud-home">← หน้าแรก</button>
           </div>
         </div>
 
+        <!-- Rich First-Person View (FPV) Avionics & Camera Viewfinder HUD (Visible ONLY in FPV mode — Press V) -->
         <div class="fpv-crosshair-hud hidden" id="fpv-crosshair-hud">
-          <div class="fpv-wing-left"></div>
-          <div class="fpv-center-bracket"></div>
-          <div class="fpv-wing-right"></div>
+          <div class="fpv-vignette"></div>
+          <div class="fpv-corner tl"></div>
+          <div class="fpv-corner tr"></div>
+          <div class="fpv-corner bl"></div>
+          <div class="fpv-corner br"></div>
+
+          <!-- Top-Left Camera Optics & REC Feed Pill -->
+          <div class="fpv-cam-badge">
+            <span class="fpv-rec-dot"></span>
+            <span class="fpv-cam-spec" id="fpv-cam-spec">REC · 4K 60FPS · 3-AXIS GIMBAL</span>
+          </div>
+
+          <!-- Top-Right Gimbal / Attitude Angle Pill (Symmetric framing, zero overlap!) -->
+          <div class="fpv-tilt-badge">
+            <span class="fpv-cam-tilt" id="fpv-cam-tilt">GIMBAL LOCK · P:0° R:0°</span>
+          </div>
+
+          <!-- Top-Center Live Compass Heading & Home Pointer -->
+          <div class="fpv-compass-bar">
+            <div class="fpv-compass-row">
+              <span class="fpv-compass-cardinal" id="fpv-hdg-left">NW</span>
+              <span class="fpv-hdg-pill" id="fpv-hdg-val">N · 000°</span>
+              <span class="fpv-compass-cardinal" id="fpv-hdg-right">NE</span>
+            </div>
+            <div class="fpv-home-pointer">
+              <span class="fpv-home-arrow" id="fpv-home-arrow">▲</span>
+              <span id="fpv-home-dist">HOME 0 ม.</span>
+            </div>
+          </div>
+
+          <!-- Left Vertical Speed & Throttle Tape -->
+          <div class="fpv-side-tape left">
+            <div class="fpv-tape-box">
+              <small>SPD</small>
+              <strong id="fpv-spd-val">0</strong>
+              <span>กม./ชม.</span>
+            </div>
+            <div class="fpv-thr-meter">
+              <div class="fpv-thr-bar-track">
+                <div class="fpv-thr-bar-fill" id="fpv-thr-bar"></div>
+              </div>
+              <span id="fpv-thr-val">THR 0%</span>
+            </div>
+            <div class="fpv-mini-tag" id="fpv-wind-mini">ลม 0.6 ม./วิ</div>
+          </div>
+
+          <!-- Center Dynamic Artificial Horizon + Pitch Ladder + Aircraft Boresight -->
+          <div class="fpv-attitude-window">
+            <div class="fpv-horizon-group" id="fpv-horizon-group">
+              <div class="fpv-pitch-rung" style="top: calc(50% - 76px);"><span>+20</span><i></i><i></i><span>+20</span></div>
+              <div class="fpv-pitch-rung" style="top: calc(50% - 38px);"><span>+10</span><i></i><i></i><span>+10</span></div>
+              <div class="fpv-horizon-main"><i></i><i></i></div>
+              <div class="fpv-pitch-rung neg" style="top: calc(50% + 38px);"><span>-10</span><i></i><i></i><span>-10</span></div>
+              <div class="fpv-pitch-rung neg" style="top: calc(50% + 76px);"><span>-20</span><i></i><i></i><span>-20</span></div>
+            </div>
+            <div class="fpv-boresight">
+              <div class="fpv-wing-left"></div>
+              <div class="fpv-center-bracket"></div>
+              <div class="fpv-wing-right"></div>
+            </div>
+          </div>
+
+          <!-- Right Vertical Altitude AGL & Climb Rate Tape -->
+          <div class="fpv-side-tape right">
+            <div class="fpv-tape-box">
+              <small>AGL</small>
+              <strong id="fpv-alt-val">0.0</strong>
+              <span id="fpv-alt-limit-tag">/ 90 ม.</span>
+            </div>
+            <div class="fpv-vs-tag" id="fpv-vs-val">V/S 0.0 ม./วิ</div>
+            <div class="fpv-mini-tag" id="fpv-alt-sensor-mini">BARO 0.0ม.</div>
+          </div>
+
+          <!-- Bottom Avionics Telemetry & LiDAR Proximity Strip -->
+          <div class="fpv-bottom-avionics">
+            <span class="fpv-av-chip" id="fpv-av-power">⚡ 16.8V (4.20V/c) · 0.0A</span>
+            <span class="fpv-av-chip" id="fpv-av-link">📡 RX 100% · GPS HOLD</span>
+            <span class="fpv-av-chip" id="fpv-av-lidar">🛡️ LiDAR โล่ง</span>
+          </div>
         </div>
 
         <div class="hud-bottom-bar">
@@ -518,7 +666,7 @@
           </div>
 
           <div class="hud-center-pill">
-            B สตาร์ท/ดับ · T บินขึ้น · L ลงจอด · G ปรับความนุ่มนวล · X×2 ตัดฉุกเฉิน · W/S/A/D/Q/E · Space/Shift · H GPS · R กลับฐาน · F พ่นปุ๋ย
+            B สตาร์ท/ดับ · T บินขึ้น · L ลงจอด · V มุมมอง · N ปรับลม · G นุ่มนวล · P สัญญาณหาย · X×2 ตัดฉุกเฉิน · W/S/A/D/Q/E · Space/Shift · H GPS · R กลับฐาน · F พ่นปุ๋ย
           </div>
 
           <div style="width: 140px;"></div>
@@ -528,16 +676,16 @@
   </section>
 
   <!-- ========================================================
-       SCREEN 6: 4 บทเรียน — 5 LEARNING UNITS (Matches Project Scope 1.1–1.6)
+       SCREEN 6: 4 บทเรียน — 5 LEARNING UNITS (Unlocked Review Mode)
        ======================================================== -->
   <section class="screen-view" id="screen-lessons">
     <div class="lessons-screen">
       <div class="lessons-top-row">
         <div class="section-title-box">
-          <h2>บทเรียนอากาศยานไร้คนขับ (6 หน่วยการเรียนรู้ · เน้นกฎหมายไทย)</h2>
-          <p>ครอบคลุมพื้นฐาน ประเภทโดรน 4 แบบ ส่วนประกอบ 12 ชิ้น หลักการบิน ไฟ LED และกฎหมายโดรนไทย (กสทช. &amp; กพท. / CAAT)</p>
+          <h2>บทเรียนอากาศยานไร้คนขับ (5 หน่วยการเรียนรู้ · เน้นกฎหมายไทย)</h2>
+          <p>ครอบคลุมพื้นฐาน ประเภทโดรน 4 แบบ ส่วนประกอบ 12 ชิ้น หลักการบิน/เซนเซอร์/ไฟ LED และกฎหมายโดรนไทย (กสทช. &amp; กพท. / CAAT)</p>
         </div>
-        <button class="btn-header-action primary" id="btn-lessons-go-quiz">📝 ไปทำแบบทดสอบ (Pre / Post-test) →</button>
+        <button class="btn-header-action primary" id="btn-lessons-go-quiz">📊 ดูผลสอบ &amp; ทำแบบทดสอบ →</button>
       </div>
 
       <div class="unit-tabs-bar" id="learning-unit-tabs"></div>
@@ -549,19 +697,19 @@
   </section>
 
   <!-- ========================================================
-       SCREEN 7: 5 แบบทดสอบ — PRE-TEST / POST-TEST & COMPARISON (Scope 2.8, 3.4)
+       SCREEN 7: 5 แบบทดสอบ — 5-UNIT PRE-TEST / POST-TEST & COMPARISON
        ======================================================== -->
   <section class="screen-view" id="screen-quiz">
     <div class="quiz-screen">
       <div class="lessons-top-row">
         <div class="section-title-box">
-          <h2>แบบทดสอบก่อนเรียนและหลังเรียน (Pre-test / Post-test)</h2>
-          <p>ประเมินความรู้ครอบคลุมทั้ง 6 หน่วยการเรียนรู้ (14 ข้อ · รวมกฎหมายโดรนไทย) พร้อมเปรียบเทียบพัฒนาการคะแนนอัตโนมัติ</p>
+          <h2>ผลคะแนนและแบบทดสอบ 5 หน่วย (Pre-test / Post-test · 50 ข้อ)</h2>
+          <p>สรุปคะแนนก่อนเรียน–หลังเรียนรายหน่วย (หน่วยละ 10 ข้อ · เกณฑ์ผ่าน ≥ 7/10) พร้อมแบบประเมิน 0–5 และส่งออก CSV</p>
         </div>
         <div class="quiz-mode-switch">
-          <button class="btn-header-action primary" id="btn-quiz-pre">ทำแบบทดสอบก่อนเรียน (Pre-test)</button>
-          <button class="btn-header-action" id="btn-quiz-post">ทำแบบทดสอบหลังเรียน (Post-test)</button>
-          <button class="btn-header-action" id="btn-quiz-compare">📊 ผลเปรียบเทียบคะแนน</button>
+          <button class="btn-header-action primary" id="btn-quiz-compare">📊 สรุปผล 5 หน่วย</button>
+          <button class="btn-header-action" id="btn-quiz-pre">📝 ทดสอบก่อนเรียนรายหน่วย</button>
+          <button class="btn-header-action" id="btn-quiz-post">✅ ทดสอบหลังเรียนรายหน่วย</button>
           <button class="btn-header-action" id="btn-quiz-eval">⭐ แบบประเมิน (0–5)</button>
         </div>
       </div>
@@ -628,10 +776,10 @@
     </div>
   </div>
 
-  <script src="js/drone-data.js?v=20261124e"></script>
-  <script src="js/learning-data.js?v=20261124e"></script>
-  <script src="js/drone-model.js?v=20261124e"></script>
-  <script src="js/flight-sim.js?v=20261124e"></script>
-  <script src="js/app.js?v=20261124e"></script>
+  <script src="js/drone-data.js?v=20261126h"></script>
+  <script src="js/learning-data.js?v=20261126h"></script>
+  <script src="js/drone-model.js?v=20261126h"></script>
+  <script src="js/flight-sim.js?v=20261126h"></script>
+  <script src="js/app.js?v=20261126h"></script>
 </body>
 </html>

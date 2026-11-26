@@ -25,11 +25,17 @@ class DroneApp {
     this.activeSelectingPartKey = null;
     this.pendingOptionId = null;
 
-    // Learning Module, Pre/Post-test Quiz, Student Profile & Mission Progress
+    // Mandatory 5-Unit Course Progression, Per-Unit Pre/Post-test Quiz, Student Profile & Mission Progress
     this.activeUnitId = 'unit1';
-    this.quizMode = 'pre'; // 'pre' | 'post' | 'compare' | 'eval'
+    this.quizMode = 'compare'; // 'compare' | 'pre' | 'post' | 'eval'
+    this.quizSelectedUnitId = 'unit1';
     this.quizAnswers = {};
     this.quizSubmitted = false;
+    this.courseProgress = this.loadCourseProgress();
+    this.courseQuizAnswers = {};
+    this.courseQuizSubmitted = false;
+    this.courseLastScore = null;
+    this.courseReviewUnitIdx = null;
     this.savedScores = this.loadSavedScores();
     this.evalRecords = this.loadEvalRecords();
     this.studentProfile = this.loadStudentProfile();
@@ -81,9 +87,9 @@ class DroneApp {
       { key: 'battery', label: 'E · แบตเตอรี่', pos: new THREE.Vector3(0.0, 0.34, -0.02) },
       { key: 'fc', label: 'F · FC + IMU', pos: new THREE.Vector3(-0.24, 0.12, -0.06) },
       { key: 'camera', label: 'G · กล้อง/เซนเซอร์ภาพ', pos: new THREE.Vector3(0.0, -0.16, 0.38) },
-      { key: 'gps', label: 'H · GPS/RTK', pos: new THREE.Vector3(0.14, 0.54, -0.22) },
-      { key: 'rx', label: 'I · ตัวรับสัญญาณ RX', pos: new THREE.Vector3(-0.18, 0.16, -0.38) },
-      { key: 'sensor', label: 'J · LiDAR/Optical Flow', pos: new THREE.Vector3(0.10, 0.30, 0.24) },
+      { key: 'gps', label: 'H · GPS/RTK (ฝังเรียบ)', pos: new THREE.Vector3(0.10, 0.24, -0.18) },
+      { key: 'rx', label: 'I · ตัวรับสัญญาณ RX', pos: new THREE.Vector3(-0.14, 0.18, -0.24) },
+      { key: 'sensor', label: 'J · LiDAR/Optical Flow', pos: new THREE.Vector3(0.08, 0.24, 0.18) },
       { key: 'payload', label: 'K · ถังปุ๋ย/เพย์โหลด', pos: new THREE.Vector3(0.0, -0.28, -0.02) },
       { key: 'safety', label: 'L · ขาตั้ง/กันชน/ร่ม', pos: new THREE.Vector3(0.28, -0.30, 0.12) }
     ];
@@ -97,6 +103,7 @@ class DroneApp {
     this.initHomePreview3D();
     this.initWorkbench3D();
     this.initFlightSim();
+    this.syncAggregateScoresFromCourse();
     this.updateAssemblyUI();
     this.showScreen('home');
   }
@@ -392,13 +399,16 @@ class DroneApp {
       this.homeRenderer.render(this.homeScene, this.homeCamera);
     };
 
-    window.addEventListener('resize', () => {
-      if (this.homeRenderer && this.homeCamera && container.clientWidth > 0) {
-        this.homeCamera.aspect = container.clientWidth / container.clientHeight;
-        this.homeCamera.updateProjectionMatrix();
-        this.homeRenderer.setSize(container.clientWidth, container.clientHeight);
-      }
-    });
+    window.addEventListener('resize', () => this.resizeHomePreview3D());
+  }
+
+  resizeHomePreview3D() {
+    const container = document.getElementById('home-canvas-viewport');
+    if (this.homeRenderer && this.homeCamera && container && container.clientWidth > 0 && container.clientHeight > 0) {
+      this.homeCamera.aspect = container.clientWidth / container.clientHeight;
+      this.homeCamera.updateProjectionMatrix();
+      this.homeRenderer.setSize(container.clientWidth, container.clientHeight);
+    }
   }
 
   syncActiveRenderLoops(screenId) {
@@ -431,8 +441,16 @@ class DroneApp {
   }
 
   showScreen(screenId) {
+    // HARD GATE: Mandatory 5-unit guided course must be passed before accessing ANY game mode!
+    // Before passing all 5 units, allow ONLY the centered Welcome Landing ('home') and the Mandatory Course ('course').
+    const isCourseLocked = !this.courseProgress || !this.courseProgress.courseCompleted;
+    if (isCourseLocked && screenId !== 'course' && screenId !== 'home') {
+      this.showStageToast('🔒 กรุณาเรียนและสอบหลังเรียนผ่านครบทั้ง 5 หน่วย (≥ 7/10) ก่อนเข้าสู่เกม');
+      screenId = 'course';
+    }
+
     const stats = calculateDroneStats(this.assembly);
-    if ((screenId === 'readiness' || screenId === 'missions') && !stats.isComplete) {
+    if (!isCourseLocked && (screenId === 'readiness' || screenId === 'missions') && !stats.isComplete) {
       const totalSlots = stats.totalSlots || Object.keys(DRONE_PARTS).length;
       this.showStageToast(`ต้องประกอบให้ครบ ${totalSlots} ชิ้นก่อน`);
       screenId = 'assembly';
@@ -440,11 +458,12 @@ class DroneApp {
 
     this.currentScreen = screenId;
 
-    // Toggle header visibility: hidden on Home and Mission Flight, visible on Tabs 1–4 and Free Flight
+    // Toggle header visibility & locked state
     const header = document.getElementById('main-app-header');
     if (header) {
       const isMissionFlight = screenId === 'simulator' && this.selectedMission && this.selectedMission.id !== 'free_flight';
-      header.classList.toggle('home-hidden', screenId === 'home' || isMissionFlight);
+      header.classList.toggle('course-locked', isCourseLocked);
+      header.classList.toggle('home-hidden', screenId === 'home' || (!isCourseLocked && isMissionFlight));
     }
 
     // Full height simulator when header hidden
@@ -457,9 +476,9 @@ class DroneApp {
     document.querySelectorAll('.screen-view').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.nav-tab-btn').forEach(btn => {
       if (btn.id === 'btn-nav-thai-law') {
-        btn.classList.toggle('active', screenId === 'lessons' && this.activeUnitId === 'unit6');
+        btn.classList.toggle('active', screenId === 'lessons' && this.activeUnitId === 'unit5');
       } else if (btn.dataset.screen === 'lessons') {
-        btn.classList.toggle('active', screenId === 'lessons' && this.activeUnitId !== 'unit6');
+        btn.classList.toggle('active', screenId === 'lessons' && this.activeUnitId !== 'unit5');
       } else {
         btn.classList.toggle('active', btn.dataset.screen === screenId);
       }
@@ -480,8 +499,11 @@ class DroneApp {
       this.flightSim.keys = {};
     }
 
-    if (screenId === 'home') {
+    if (screenId === 'course') {
+      this.renderCourseScreen();
+    } else if (screenId === 'home') {
       this.updateHomeDashboard();
+      requestAnimationFrame(() => this.resizeHomePreview3D());
     } else if (screenId === 'assembly') {
       this.refreshWorkbench();
     } else if (screenId === 'readiness') {
@@ -503,7 +525,7 @@ class DroneApp {
     document.querySelectorAll('.nav-tab-btn').forEach(btn => {
       if (!btn.dataset.screen) return;
       btn.addEventListener('click', () => {
-        if (btn.dataset.screen === 'lessons' && this.activeUnitId === 'unit6') {
+        if (btn.dataset.screen === 'lessons' && this.activeUnitId === 'unit5') {
           this.activeUnitId = 'unit1';
         }
         this.showScreen(btn.dataset.screen);
@@ -520,6 +542,11 @@ class DroneApp {
     document.getElementById('btn-top-freeflight').addEventListener('click', () => this.launchFreeFlightSafe());
     document.getElementById('btn-top-reset').addEventListener('click', () => this.resetToEmpty());
 
+    const btnStartLearning = document.getElementById('btn-home-start-learning');
+    if (btnStartLearning) {
+      btnStartLearning.addEventListener('click', () => this.showScreen('course'));
+    }
+
     document.getElementById('btn-home-assembly').addEventListener('click', () => this.showScreen('assembly'));
     document.getElementById('btn-home-freeflight').addEventListener('click', () => this.launchFreeFlightSafe());
     document.getElementById('btn-home-missions').addEventListener('click', () => this.showScreen('missions'));
@@ -527,14 +554,15 @@ class DroneApp {
     const btnHomeLaw = document.getElementById('btn-home-thai-law');
     if (btnHomeLaw) {
       btnHomeLaw.addEventListener('click', () => {
-        this.activeUnitId = 'unit6';
+        if (!this.courseProgress || !this.courseProgress.courseCompleted) return;
+        this.activeUnitId = 'unit5';
         this.showScreen('lessons');
       });
     }
     const btnNavLaw = document.getElementById('btn-nav-thai-law');
     if (btnNavLaw) {
       btnNavLaw.addEventListener('click', () => {
-        this.activeUnitId = 'unit6';
+        this.activeUnitId = 'unit5';
         this.showScreen('lessons');
       });
     }
@@ -644,7 +672,7 @@ class DroneApp {
       btnCam.addEventListener('click', () => {
         if (this.flightSim) {
           const isFpv = this.flightSim.toggleCamera();
-          btnCam.innerText = isFpv ? '📷 FPV' : '📷 มุมมองที่ 3';
+          btnCam.innerText = isFpv ? '📷 FPV (V)' : '📷 มุมมองที่ 3 (V)';
           btnCam.classList.toggle('primary', isFpv);
           const reticle = document.getElementById('fpv-crosshair-hud');
           if (reticle) reticle.classList.toggle('hidden', !isFpv);
@@ -687,6 +715,24 @@ class DroneApp {
       btnHudRateMode.addEventListener('click', () => {
         if (this.flightSim) {
           this.flightSim.cycleControlRateMode();
+        }
+      });
+    }
+
+    const btnHudWind = document.getElementById('btn-hud-wind');
+    if (btnHudWind) {
+      btnHudWind.addEventListener('click', () => {
+        if (this.flightSim && typeof this.flightSim.cycleWindPreset === 'function') {
+          this.flightSim.cycleWindPreset();
+        }
+      });
+    }
+
+    const btnHudFailsafe = document.getElementById('btn-hud-failsafe');
+    if (btnHudFailsafe) {
+      btnHudFailsafe.addEventListener('click', () => {
+        if (this.flightSim && typeof this.flightSim.toggleSimulatedSensorLoss === 'function') {
+          this.flightSim.toggleSimulatedSensorLoss();
         }
       });
     }
@@ -842,6 +888,10 @@ class DroneApp {
   }
 
   launchFreeFlightSafe() {
+    if (!this.courseProgress || !this.courseProgress.courseCompleted) {
+      this.showScreen('course');
+      return;
+    }
     const stats = calculateDroneStats(this.assembly);
     if (!stats.isComplete) {
       // Auto-load recommended preset so user can immediately try Free Flight
@@ -1103,6 +1153,12 @@ class DroneApp {
     document.getElementById('stat-thrust').innerText = stats.isComplete ? `${stats.totalThrust.toLocaleString()} ก.` : '—';
     document.getElementById('stat-tw').innerText = stats.isComplete ? `${stats.twRatio}` : '—';
     document.getElementById('stat-flight-time').innerText = stats.isComplete ? stats.estHoverSecStr : '—';
+    const maxAltEl = document.getElementById('stat-max-alt');
+    if (maxAltEl) {
+      maxAltEl.innerText = stats.isComplete
+        ? (stats.maxClimbAltitude > 0 ? `${stats.maxClimbAltitude} ม. (ลิมิต ${stats.maxAltitudeLimitM || 90} ม.)` : '0 ม. (บินไม่ขึ้น)')
+        : (stats.resolvedParts && stats.resolvedParts.frame ? `≤ ${stats.resolvedParts.frame.maxAltitudeLimitM || 90} ม.` : '—');
+    }
     document.getElementById('stat-current').innerText = stats.isComplete ? `${stats.maxCurrentAmps} A` : '—';
     document.getElementById('stat-price').innerText = `฿${stats.totalPrice.toLocaleString()}`;
 
@@ -1504,6 +1560,101 @@ class DroneApp {
     }
   }
 
+  createDefaultCourseProgress() {
+    const units = {};
+    const list = (typeof LEARNING_UNITS !== 'undefined' && LEARNING_UNITS.length)
+      ? LEARNING_UNITS
+      : [{ id: 'unit1' }, { id: 'unit2' }, { id: 'unit3' }, { id: 'unit4' }, { id: 'unit5' }];
+    list.forEach(u => {
+      units[u.id] = {
+        preScore: null,
+        lessonDone: false,
+        postScore: null,
+        bestPostScore: null,
+        postPassed: false,
+        attempts: 0
+      };
+    });
+    return {
+      units,
+      currentUnitIndex: 0,
+      currentStage: 'pre', // 'pre' | 'lesson' | 'post'
+      courseCompleted: false,
+      completedAt: null
+    };
+  }
+
+  loadCourseProgress() {
+    const def = this.createDefaultCourseProgress();
+    try {
+      const raw = localStorage.getItem('drone_builder_course_progress_v1');
+      if (!raw) return def;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return def;
+      const merged = this.createDefaultCourseProgress();
+      Object.keys(merged.units).forEach(uid => {
+        if (parsed.units && parsed.units[uid]) {
+          merged.units[uid] = Object.assign({}, merged.units[uid], parsed.units[uid]);
+        }
+      });
+      merged.currentUnitIndex = Math.max(0, Math.min(Object.keys(merged.units).length - 1, Number(parsed.currentUnitIndex) || 0));
+      merged.currentStage = ['pre', 'lesson', 'post'].includes(parsed.currentStage) ? parsed.currentStage : 'pre';
+      // Strictly verify all 5 units actually have postPassed === true before allowing courseCompleted!
+      const allPassed = Object.keys(merged.units).every(uid => Boolean(merged.units[uid].postPassed));
+      merged.courseCompleted = Boolean(parsed.courseCompleted) && allPassed;
+      merged.completedAt = merged.courseCompleted ? (parsed.completedAt || null) : null;
+      return merged;
+    } catch {
+      return def;
+    }
+  }
+
+  saveCourseProgress() {
+    try {
+      localStorage.setItem('drone_builder_course_progress_v1', JSON.stringify(this.courseProgress));
+    } catch {
+      // ignore storage quota errors
+    }
+    this.syncAggregateScoresFromCourse();
+  }
+
+  syncAggregateScoresFromCourse() {
+    if (!this.courseProgress || !this.courseProgress.units || typeof LEARNING_UNITS === 'undefined') return;
+    let preSum = 0;
+    let preCount = 0;
+    let postSum = 0;
+    let postCount = 0;
+    LEARNING_UNITS.forEach(u => {
+      const up = this.courseProgress.units[u.id];
+      if (!up) return;
+      if (up.preScore !== null && up.preScore !== undefined) {
+        preSum += up.preScore;
+        preCount++;
+      }
+      const pVal = up.bestPostScore !== null && up.bestPostScore !== undefined ? up.bestPostScore : up.postScore;
+      if (pVal !== null && pVal !== undefined) {
+        postSum += pVal;
+        postCount++;
+      }
+    });
+    this.savedScores = {
+      pre: preCount > 0 ? preSum : null,
+      post: postCount > 0 ? postSum : null
+    };
+    this.saveScores();
+  }
+
+  resetMandatoryCourse() {
+    this.courseProgress = this.createDefaultCourseProgress();
+    this.courseQuizAnswers = {};
+    this.courseQuizSubmitted = false;
+    this.courseLastScore = null;
+    this.courseReviewUnitIdx = null;
+    this.savedScores = { pre: null, post: null };
+    this.saveCourseProgress();
+    this.showScreen('home');
+  }
+
   loadSavedScores() {
     try {
       const raw = localStorage.getItem('drone_builder_quiz_scores');
@@ -1573,6 +1724,40 @@ class DroneApp {
   }
 
   updateHomeDashboard() {
+    // 0. Toggle Pre-Learning Centered Welcome Gate vs Full Unlocked Free-Play Dashboard
+    const isLocked = !this.courseProgress || !this.courseProgress.courseCompleted;
+    const homeRoot = document.getElementById('home-screen-root');
+    if (homeRoot) {
+      homeRoot.classList.toggle('home-locked-welcome', isLocked);
+    }
+    const freePill = document.getElementById('home-free-pill');
+    if (freePill) {
+      freePill.innerText = isLocked ? 'หลักสูตรบังคับ 5 หน่วย' : 'เล่นฟรี · ไม่ต้องติดตั้ง';
+    }
+    const btnHomeLaw = document.getElementById('btn-home-thai-law');
+    if (btnHomeLaw) {
+      btnHomeLaw.title = isLocked ? '' : 'คลิกเพื่อเปิดบทเรียนกฎหมายโดรนประเทศไทย (หน่วยที่ 5)';
+    }
+    if (isLocked && this.courseProgress) {
+      const startLabel = document.getElementById('btn-home-start-label');
+      const startNote = document.getElementById('home-start-learning-note');
+      const passedCount = (typeof LEARNING_UNITS !== 'undefined')
+        ? LEARNING_UNITS.filter(u => this.courseProgress.units[u.id]?.postPassed).length
+        : 0;
+      const curIdx = this.courseProgress.currentUnitIdx || 0;
+      const curStage = this.courseProgress.currentStage || 'pre';
+      const isFresh = passedCount === 0 && curIdx === 0 && curStage === 'pre';
+      const stageNames = { pre: 'แบบทดสอบก่อนเรียน (10 ข้อ)', lesson: 'บทเรียน', post: 'แบบทดสอบหลังเรียน (10 ข้อ)' };
+      if (startLabel) {
+        startLabel.innerText = isFresh ? 'เริ่มเรียน' : `เริ่มเรียนต่อ (หน่วยที่ ${curIdx + 1})`;
+      }
+      if (startNote) {
+        startNote.innerText = isFresh
+          ? 'เข้าสู่แบบทดสอบก่อนเรียน หน่วยที่ 1 (10 ข้อ) · เรียนและสอบผ่าน ≥ 7/10 ครบทั้ง 5 หน่วย เพื่อปลดล็อกโหมดเล่นอิสระ'
+          : `เรียนต่อจากเดิม: หน่วยที่ ${curIdx + 1} · ${stageNames[curStage] || 'แบบทดสอบก่อนเรียน'} (ผ่านแล้ว ${passedCount}/5 หน่วย)`;
+      }
+    }
+
     // 1. Topbar student profile pill
     const profLabel = document.getElementById('home-profile-label');
     if (profLabel) {
@@ -1585,13 +1770,16 @@ class DroneApp {
       }
     }
 
-    // 2. Lessons & Quiz progress indicator
+    // 2. Lessons & Quiz progress indicator (5-Unit Curriculum · 50 Questions)
     const progLessons = document.getElementById('home-progress-lessons');
     if (progLessons) {
-      const totalQ = typeof QUIZ_QUESTIONS !== 'undefined' ? QUIZ_QUESTIONS.length : 10;
-      const preTxt = this.savedScores.pre !== null ? `ทำแล้ว (${this.savedScores.pre}/${totalQ})` : 'ยังไม่ทำ';
-      const postTxt = this.savedScores.post !== null ? `ทำแล้ว (${this.savedScores.post}/${totalQ})` : 'ยังไม่ทำ';
-      progLessons.innerText = `Pre-test: ${preTxt} · Post-test: ${postTxt}`;
+      const totalQ = typeof QUIZ_QUESTIONS !== 'undefined' ? QUIZ_QUESTIONS.length : 50;
+      const preTxt = this.savedScores.pre !== null ? `${this.savedScores.pre}/${totalQ}` : 'ยังไม่ทำ';
+      const postTxt = this.savedScores.post !== null ? `${this.savedScores.post}/${totalQ}` : 'ยังไม่ทำ';
+      const passedCount = (typeof LEARNING_UNITS !== 'undefined' && this.courseProgress)
+        ? LEARNING_UNITS.filter(u => this.courseProgress.units[u.id]?.postPassed).length
+        : 0;
+      progLessons.innerText = `ผ่าน ${passedCount}/5 หน่วย · Pre-test: ${preTxt} · Post-test: ${postTxt}`;
     }
 
     // 3. Assembly progress & live 3D telemetry chips
@@ -1624,28 +1812,45 @@ class DroneApp {
       alert('ยังไม่มีข้อมูลผลประเมินที่บันทึกไว้ กรุณากรอกและกด "บันทึกผลประเมิน" อย่างน้อย 1 รายการก่อนส่งออก CSV');
       return;
     }
-    const totalQ = typeof QUIZ_QUESTIONS !== 'undefined' ? QUIZ_QUESTIONS.length : 14;
+    const totalQ = typeof QUIZ_QUESTIONS !== 'undefined' ? QUIZ_QUESTIONS.length : 50;
     const headers = [
       'วันเวลา',
       'ชื่อ-นามสกุล',
       'รหัสนักศึกษา',
-      `คะแนน Pre-test (/${totalQ})`,
-      `คะแนน Post-test (/${totalQ})`,
-      'หัวข้อที่ 1 (ความสวยงาม/ใช้งานง่าย)',
-      'หัวข้อที่ 2 (ความครบถ้วนเนื้อหา)',
-      'หัวข้อที่ 3 (ความสมจริงโมเดล 3D)',
-      'หัวข้อที่ 4 (ระบบจำลองการบิน)',
-      'หัวข้อที่ 5 (เข้าใจระบบโดรนมากขึ้น)',
-      'หัวข้อที่ 6 (ความพึงพอใจโดยรวม)',
+      `คะแนน Pre-test รวม (/${totalQ})`,
+      `คะแนน Post-test รวม (/${totalQ})`,
+      'หน่วย 1 (Pre/Post)',
+      'หน่วย 2 (Pre/Post)',
+      'หน่วย 3 (Pre/Post)',
+      'หน่วย 4 (Pre/Post)',
+      'หน่วย 5 (Pre/Post)',
+      'หัวข้อที่ 1 (เนื้อหา/ความถูกต้อง)',
+      'หัวข้อที่ 2 (การออกแบบ/ความสวยงาม)',
+      'หัวข้อที่ 3 (ความสะดวก/ลำดับเรียน)',
+      'หัวข้อที่ 4 (ประสิทธิภาพระบบ 3D)',
+      'หัวข้อที่ 5 (ประโยชน์การเรียนรู้)',
+      'หัวข้อที่ 6 (ความเหมาะสมเกมจำลองบิน)',
       'ค่าเฉลี่ย (0-5)'
     ];
     const escapeCell = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const unitPair = (r, uid) => {
+      const u = r.unitScores && r.unitScores[uid];
+      if (!u) return '-';
+      const pre = u.pre !== null && u.pre !== undefined ? u.pre : '-';
+      const post = u.post !== null && u.post !== undefined ? u.post : '-';
+      return `${pre}/${post}`;
+    };
     const rows = this.evalRecords.map(r => [
       r.timestamp,
       r.name || 'ไม่ระบุชื่อ',
       r.studentId || '-',
       r.pre !== null && r.pre !== undefined ? r.pre : '-',
       r.post !== null && r.post !== undefined ? r.post : '-',
+      unitPair(r, 'unit1'),
+      unitPair(r, 'unit2'),
+      unitPair(r, 'unit3'),
+      unitPair(r, 'unit4'),
+      unitPair(r, 'unit5'),
       r.ratings.c1,
       r.ratings.c2,
       r.ratings.c3,
@@ -1668,30 +1873,8 @@ class DroneApp {
     URL.revokeObjectURL(url);
   }
 
-  renderLessonsScreen() {
-    const tabsEl = document.getElementById('learning-unit-tabs');
-    const bodyEl = document.getElementById('learning-unit-content');
-    const partsRowsEl = document.getElementById('lesson-rows-container');
-    if (!tabsEl || !bodyEl || typeof LEARNING_UNITS === 'undefined') return;
-
-    tabsEl.innerHTML = '';
-    LEARNING_UNITS.forEach(u => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `unit-tab-btn ${this.activeUnitId === u.id ? 'active' : ''}`;
-      btn.innerHTML = `<b>${u.num}</b> <span>${u.title}</span>`;
-      btn.addEventListener('click', () => {
-        this.activeUnitId = u.id;
-        this.renderLessonsScreen();
-        document.querySelectorAll('.nav-tab-btn').forEach(nb => {
-          if (nb.id === 'btn-nav-thai-law') nb.classList.toggle('active', this.activeUnitId === 'unit6');
-          else if (nb.dataset.screen === 'lessons') nb.classList.toggle('active', this.activeUnitId !== 'unit6');
-        });
-      });
-      tabsEl.appendChild(btn);
-    });
-
-    const unit = LEARNING_UNITS.find(u => u.id === this.activeUnitId) || LEARNING_UNITS[0];
+  // Shared Rich Unit Content Renderer (used by BOTH Mandatory Course Screen & Unlocked Lessons Screen)
+  renderUnitContentInto(bodyEl, unit, partsRowsEl = null) {
     bodyEl.innerHTML = `
       <div class="unit-banner">
         <small>${unit.num} · ${unit.enTitle}</small>
@@ -1701,8 +1884,10 @@ class DroneApp {
     `;
 
     if (unit.isDynamicPartsUnit) {
-      partsRowsEl.style.display = 'flex';
-      partsRowsEl.innerHTML = '';
+      const listTarget = partsRowsEl || document.createElement('div');
+      listTarget.className = 'lesson-rows-container';
+      listTarget.style.display = 'flex';
+      listTarget.innerHTML = '';
       for (const partKey in DRONE_PARTS) {
         const partDef = DRONE_PARTS[partKey];
         const selectedOptId = this.assembly[partKey];
@@ -1711,15 +1896,98 @@ class DroneApp {
         row.className = 'lesson-row-card';
         row.innerHTML = `
           <div class="lesson-part-number">${partDef.num} ${partDef.name}</div>
-          <div class="lesson-part-choice">${selectedOpt ? selectedOpt.name : '— ยังไม่ได้เลือก —'}</div>
-          <div class="lesson-part-text">${selectedOpt ? selectedOpt.lesson : partDef.lesson}</div>
+          <div class="lesson-part-choice">${selectedOpt ? selectedOpt.name : '— ชิ้นส่วนหลัก —'}</div>
+          <div class="lesson-part-text">
+            <div>${partDef.lesson}</div>
+            ${selectedOpt ? `<div style="margin-top:6px; color:#93c5fd; font-size:12.5px;"><b>ตัวอย่างรุ่นในชุดปัจจุบัน (${selectedOpt.name}):</b> ${selectedOpt.lesson}</div>` : ''}
+          </div>
         `;
-        partsRowsEl.appendChild(row);
+        listTarget.appendChild(row);
       }
+      if (!partsRowsEl) bodyEl.appendChild(listTarget);
       return;
     }
 
-    partsRowsEl.style.display = 'none';
+    if (partsRowsEl) partsRowsEl.style.display = 'none';
+
+    // Illustrated Visual Figures (Generated with Figma & paired with crisp Thai captions/legends)
+    if (unit.illustrations && unit.illustrations.length > 0) {
+      const figGrid = document.createElement('div');
+      figGrid.className = `lesson-illustrations-grid ${unit.illustrations.length === 1 ? 'single-hero' : ''}`;
+      unit.illustrations.forEach(fig => {
+        const card = document.createElement('figure');
+        card.className = 'lesson-figure-card';
+        const legendsHtml = fig.legends
+          ? `<div class="lesson-fig-legends">${fig.legends.map(l => `
+              <span class="lesson-fig-legend-item">
+                <i style="background:${l.color}; box-shadow:0 0 8px ${l.color};"></i>
+                <span>${l.text}</span>
+              </span>
+            `).join('')}</div>`
+          : '';
+        card.innerHTML = `
+          <div class="lesson-fig-media">
+            <img src="${fig.src}" alt="${fig.title}" loading="eager" />
+            ${fig.badge ? `<span class="lesson-fig-badge">${fig.badge}</span>` : ''}
+          </div>
+          <figcaption class="lesson-fig-caption">
+            <h4>${fig.title}</h4>
+            <p>${fig.caption}</p>
+            ${legendsHtml}
+          </figcaption>
+        `;
+        figGrid.appendChild(card);
+      });
+      bodyEl.appendChild(figGrid);
+    }
+
+    if (unit.timeline && unit.timeline.length > 0) {
+      if (unit.timelineHeading) {
+        const tlH = document.createElement('h4');
+        tlH.className = 'led-subsection-heading';
+        tlH.innerText = `⏳ ${unit.timelineHeading}`;
+        bodyEl.appendChild(tlH);
+      }
+      const tlGrid = document.createElement('div');
+      tlGrid.className = 'lesson-timeline-grid';
+      unit.timeline.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'lesson-timeline-card';
+        card.innerHTML = `
+          <span class="timeline-era-pill">${item.era}</span>
+          <h4>${item.title}</h4>
+          <p>${item.desc}</p>
+        `;
+        tlGrid.appendChild(card);
+      });
+      bodyEl.appendChild(tlGrid);
+    }
+
+    if (unit.partCards && unit.partCards.length > 0) {
+      if (unit.partCardsHeading) {
+        const pcH = document.createElement('h4');
+        pcH.className = 'led-subsection-heading';
+        pcH.innerText = `🧩 ${unit.partCardsHeading}`;
+        bodyEl.appendChild(pcH);
+      }
+      const pcGrid = document.createElement('div');
+      pcGrid.className = 'part-overview-grid';
+      unit.partCards.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'part-overview-card';
+        card.innerHTML = `
+          <div class="part-overview-top">
+            <span class="part-overview-num">${item.num}</span>
+            <span class="part-overview-group">${item.group}</span>
+          </div>
+          <h4>${item.name}</h4>
+          <p class="part-overview-sum">${item.summary}</p>
+          <p class="part-overview-det">${item.detail}</p>
+        `;
+        pcGrid.appendChild(card);
+      });
+      bodyEl.appendChild(pcGrid);
+    }
 
     if (unit.cards) {
       const grid = document.createElement('div');
@@ -1728,33 +1996,18 @@ class DroneApp {
         const card = document.createElement('div');
         card.className = 'drone-type-card';
         card.innerHTML = `
-          <span class="type-tag">${c.tag}</span>
-          <h4>${c.name}</h4>
-          <p><b>จุดเด่น:</b> ${c.pros}</p>
-          <p><b>ข้อจำกัด:</b> ${c.cons}</p>
-          <p><b>การใช้งาน:</b> ${c.useCase}</p>
+          ${c.image ? `<div class="drone-type-visual"><img src="${c.image}" alt="${c.name}" loading="eager" /><span class="type-tag">${c.tag}</span></div>` : `<span class="type-tag">${c.tag}</span>`}
+          <div class="drone-type-body">
+            <h4>${c.name}</h4>
+            ${c.altitudeLimit ? `<p><b>เพดานบินจริง:</b> ${c.altitudeLimit}</p>` : ''}
+            <p><b>จุดเด่น:</b> ${c.pros}</p>
+            <p><b>ข้อจำกัด:</b> ${c.cons}</p>
+            <p><b>การใช้งาน:</b> ${c.useCase}</p>
+          </div>
         `;
         grid.appendChild(card);
       });
       bodyEl.appendChild(grid);
-    }
-
-    if (unit.ledLegend) {
-      const ledGrid = document.createElement('div');
-      ledGrid.className = 'led-legend-grid';
-      unit.ledLegend.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'led-legend-card';
-        card.innerHTML = `
-          <div class="led-legend-swatch" style="background:${item.color}; box-shadow:0 0 12px ${item.color};"></div>
-          <div>
-            <h4>${item.icon} ${item.name}</h4>
-            <p>${item.meaning}</p>
-          </div>
-        `;
-        ledGrid.appendChild(card);
-      });
-      bodyEl.appendChild(ledGrid);
     }
 
     if (unit.isThaiLawUnit && typeof evaluateThailandDroneLaw === 'function') {
@@ -1765,7 +2018,7 @@ class DroneApp {
       liveBox.innerHTML = `
         <div class="law-live-head">
           <div>
-            <span class="law-live-kicker">⚖️ วิเคราะห์กฎหมายไทยแบบ Real-Time จากโดรนที่คุณประกอบตอนนี้</span>
+            <span class="law-live-kicker">⚖️ วิเคราะห์กฎหมายไทยแบบ Real-Time จากโดรนมาตรฐาน/ชุดที่คุณประกอบ</span>
             <h4>น้ำหนักรวม ${law.weightKg} กก. · ${law.weightClassLabel}</h4>
           </div>
           <span class="badge-tag ${law.needCAAT ? 'warning' : 'success'}">${law.needCAAT ? 'ต้องขึ้นทะเบียน กสทช. + กพท.' : 'ขึ้นทะเบียน กสทช.'}</span>
@@ -1801,6 +2054,25 @@ class DroneApp {
       bodyEl.appendChild(rulesGrid);
     }
 
+    if (unit.comparisonTable && unit.comparisonTable.headers && unit.comparisonTable.rows) {
+      const tblWrap = document.createElement('div');
+      tblWrap.className = 'lesson-table-card';
+      const thHtml = unit.comparisonTable.headers.map(h => `<th>${h}</th>`).join('');
+      const trHtml = unit.comparisonTable.rows.map(row => `
+        <tr>${row.map((cell, ci) => `<td${ci === 0 ? ' class="col-strong"' : ''}>${cell}</td>`).join('')}</tr>
+      `).join('');
+      tblWrap.innerHTML = `
+        <h4>📊 ${unit.comparisonTable.heading}</h4>
+        <div class="lesson-table-scroll">
+          <table class="lesson-compare-table">
+            <thead><tr>${thHtml}</tr></thead>
+            <tbody>${trHtml}</tbody>
+          </table>
+        </div>
+      `;
+      bodyEl.appendChild(tblWrap);
+    }
+
     if (unit.lawPenalties) {
       const penTitle = document.createElement('div');
       penTitle.className = 'law-penalty-heading';
@@ -1823,8 +2095,9 @@ class DroneApp {
       bodyEl.appendChild(penGrid);
     }
 
-    if (unit.sections) {
-      unit.sections.forEach(sec => {
+    const appendSections = (secList) => {
+      if (!secList) return;
+      secList.forEach(sec => {
         const card = document.createElement('div');
         card.className = 'unit-section-card';
         let inner = `<h4>${sec.heading}</h4>`;
@@ -1835,11 +2108,569 @@ class DroneApp {
         card.innerHTML = inner;
         bodyEl.appendChild(card);
       });
+    };
+
+    appendSections(unit.sections);
+
+    if (unit.ledLegend) {
+      if (unit.ledSectionHeading) {
+        const ledH = document.createElement('h4');
+        ledH.className = 'led-subsection-heading';
+        ledH.innerText = unit.ledSectionHeading;
+        bodyEl.appendChild(ledH);
+      }
+      const ledGrid = document.createElement('div');
+      ledGrid.className = 'led-legend-grid';
+      unit.ledLegend.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'led-legend-card';
+        card.innerHTML = `
+          <div class="led-legend-swatch" style="background:${item.color}; box-shadow:0 0 12px ${item.color};"></div>
+          <div>
+            <h4>${item.icon} ${item.name}</h4>
+            <p>${item.meaning}</p>
+          </div>
+        `;
+        ledGrid.appendChild(card);
+      });
+      bodyEl.appendChild(ledGrid);
+    }
+
+    appendSections(unit.postLedSections);
+  }
+
+  buildFiveUnitScoreTableHTML() {
+    const passScore = typeof QUIZ_PASS_SCORE !== 'undefined' ? QUIZ_PASS_SCORE : 7;
+    let totalPre = 0;
+    let totalPost = 0;
+    let totalQuestions = 0;
+    const rowsHtml = LEARNING_UNITS.map(u => {
+      const up = this.courseProgress.units[u.id] || {};
+      const qs = (typeof UNIT_QUIZ_QUESTIONS !== 'undefined' && UNIT_QUIZ_QUESTIONS[u.id]) ? UNIT_QUIZ_QUESTIONS[u.id] : [];
+      const qCount = qs.length || 10;
+      totalQuestions += qCount;
+      const pre = up.preScore !== null && up.preScore !== undefined ? up.preScore : null;
+      const post = up.bestPostScore !== null && up.bestPostScore !== undefined ? up.bestPostScore : up.postScore;
+      if (pre !== null) totalPre += pre;
+      if (post !== null && post !== undefined) totalPost += post;
+      const gain = (pre !== null && post !== null && post !== undefined) ? (post - pre) : null;
+      const gainStr = gain === null ? '—' : (gain >= 0 ? `+${gain}` : `${gain}`);
+      const statusBadge = up.postPassed
+        ? `<span style="color:#4ade80; font-weight:700;">✓ ผ่านเกณฑ์ (≥${passScore})</span>`
+        : `<span style="color:#fbbf24;">ยังไม่ผ่าน</span>`;
+      return `
+        <tr>
+          <td><b>${u.num}</b> · ${u.shortLabel || u.title}</td>
+          <td>${pre !== null ? `${pre} / ${qCount}` : '—'}</td>
+          <td>${post !== null && post !== undefined ? `${post} / ${qCount}` : '—'}</td>
+          <td>${gainStr}</td>
+          <td>${statusBadge}</td>
+        </tr>
+      `;
+    }).join('');
+    const totalGain = totalPost - totalPre;
+    const totalPct = totalQuestions > 0 ? Math.round((totalGain / totalQuestions) * 100) : 0;
+    return `
+      <table class="course-score-table">
+        <thead>
+          <tr>
+            <th>หน่วยการเรียนรู้</th>
+            <th>ก่อนเรียน (Pre)</th>
+            <th>หลังเรียน (Post)</th>
+            <th>พัฒนาการ</th>
+            <th>สถานะ</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+          <tr class="total-row">
+            <td>รวมทั้ง 5 หน่วย</td>
+            <td>${totalPre} / ${totalQuestions}</td>
+            <td>${totalPost} / ${totalQuestions}</td>
+            <td>${totalGain >= 0 ? '+' : ''}${totalGain} (${totalGain >= 0 ? '+' : ''}${totalPct}%)</td>
+            <td>${this.courseProgress.courseCompleted ? '🔓 ปลดล็อกเกมแล้ว' : '🔒 กำลังเรียน'}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  }
+
+  scrollCourseTop() {
+    const el = document.querySelector('.course-screen');
+    if (el) el.scrollTop = 0;
+  }
+
+  // Mandatory Guided 5-Unit Course Screen (Pre-test -> Lesson -> Post-test >= 7/10 for Units 1..5 -> Free Play!)
+  renderCourseScreen() {
+    if (typeof LEARNING_UNITS === 'undefined' || typeof UNIT_QUIZ_QUESTIONS === 'undefined') return;
+    const passScore = typeof QUIZ_PASS_SCORE !== 'undefined' ? QUIZ_PASS_SCORE : 7;
+    const stepperEl = document.getElementById('course-stepper');
+    const subStepperEl = document.getElementById('course-substepper');
+    const headingEl = document.getElementById('course-main-heading');
+    const bodyEl = document.getElementById('course-stage-body');
+    const lockBadge = document.getElementById('course-lock-badge');
+    const lockStepPill = document.getElementById('course-lock-step-pill');
+    if (!stepperEl || !subStepperEl || !bodyEl) return;
+
+    const passedCount = LEARNING_UNITS.filter(u => this.courseProgress.units[u.id]?.postPassed).length;
+
+    // Determine whether we're showing the pass review screen right after passing a unit's Post-test
+    const showingPassReview = this.courseReviewUnitIdx !== null;
+    const showGrandCelebration = this.courseProgress.courseCompleted && !showingPassReview;
+
+    const activeIdx = showingPassReview
+      ? this.courseReviewUnitIdx
+      : Math.max(0, Math.min(LEARNING_UNITS.length - 1, this.courseProgress.currentUnitIndex || 0));
+    const unit = LEARNING_UNITS[activeIdx];
+    const uProg = this.courseProgress.units[unit.id];
+    const stage = showingPassReview ? 'post' : (this.courseProgress.currentStage || 'pre');
+
+    // Update Locked Header Strip
+    if (lockBadge) {
+      lockBadge.innerText = this.courseProgress.courseCompleted
+        ? `🔓 ผ่านครบทั้ง 5 หน่วยแล้ว! ปลดล็อกเกมอิสระเรียบร้อย`
+        : `🔒 หลักสูตรบังคับก่อนเข้าเกม · ผ่านแล้ว ${passedCount}/5 หน่วย`;
+    }
+    if (lockStepPill) {
+      const stageTh = stage === 'pre'
+        ? 'สอบก่อนเรียน (10 ข้อ)'
+        : stage === 'lesson'
+          ? 'ศึกษาเนื้อหาบทเรียน'
+          : `สอบหลังเรียน (ผ่าน ≥ ${passScore}/10)`;
+      lockStepPill.innerText = showGrandCelebration
+        ? '🎉 พร้อมเข้าสู่เกมอิสระ!'
+        : `${unit.num} · ${stageTh}`;
+    }
+
+    // 1. Render 5-Unit Roadmap Stepper + Final Game Unlock Chip
+    stepperEl.innerHTML = '';
+    LEARNING_UNITS.forEach((u, idx) => {
+      const p = this.courseProgress.units[u.id] || {};
+      const chip = document.createElement('div');
+      let cls = 'course-step-chip';
+      let statusTxt = '🔒 ล็อก';
+      if (p.postPassed && !(showingPassReview && idx === activeIdx)) {
+        cls += ' done';
+        statusTxt = `✓ ผ่าน (${p.bestPostScore ?? p.postScore}/10)`;
+      } else if (!showGrandCelebration && idx === activeIdx) {
+        cls += ' active';
+        statusTxt = stage === 'pre' ? '① สอบก่อนเรียน' : stage === 'lesson' ? '② กำลังเรียน' : '③ สอบหลังเรียน';
+      } else {
+        cls += ' locked';
+      }
+      chip.className = cls;
+      chip.innerHTML = `
+        <span class="step-num">${u.num}</span>
+        <span class="step-title">${u.shortLabel || u.title}</span>
+        <span class="step-status">${statusTxt}</span>
+      `;
+      stepperEl.appendChild(chip);
+    });
+
+    const unlockChip = document.createElement('div');
+    unlockChip.className = `course-step-chip ${this.courseProgress.courseCompleted ? 'done' : 'locked'}`;
+    unlockChip.innerHTML = `
+      <span class="step-num">ปลดล็อก</span>
+      <span class="step-title">🎮 เล่นเกมอิสระ</span>
+      <span class="step-status">${this.courseProgress.courseCompleted ? '🔓 พร้อมเล่น!' : '🔒 รอครบ 5 หน่วย'}</span>
+    `;
+    stepperEl.appendChild(unlockChip);
+
+    // 2. Grand Celebration View after passing all 5 units!
+    if (showGrandCelebration) {
+      if (headingEl) headingEl.innerText = '🎉 ยินดีด้วย! คุณผ่านครบทั้ง 5 หน่วยการเรียนรู้แล้ว';
+      subStepperEl.innerHTML = `
+        <span class="course-sub-pill done">✓ ผ่านแบบทดสอบหลังเรียนครบ 5 หน่วย (≥ ${passScore}/10 ทุกหน่วย)</span>
+        <span class="course-sub-pill done">🔓 ปลดล็อกทุกโหมดเกมจำลองการบิน 3 มิติแล้ว!</span>
+      `;
+      bodyEl.innerHTML = `
+        <div class="course-unlock-hero">
+          <div>
+            <h3>🔓 ปลดล็อกเกม Drone Builder อย่างอิสระเรียบร้อยแล้ว!</h3>
+            <p>คุณได้ศึกษาและสอบผ่านเกณฑ์ครบทั้ง 5 หน่วยการเรียนรู้ (พื้นฐาน UAV · ประเภทโดรน · ส่วนประกอบ 12 ชิ้น · หลักการบิน/เซนเซอร์/ไฟ LED · กฎหมายโดรนไทย) ตอนนี้สามารถประกอบโดรน ทดสอบบินอิสระ และทำภารกิจได้เต็มรูปแบบแล้วครับ</p>
+          </div>
+          ${this.buildFiveUnitScoreTableHTML()}
+          <div class="course-result-actions">
+            <button type="button" class="btn-header-action primary" id="btn-unlock-go-home">🏠 เข้าสู่หน้าหลัก (เล่นเกมอย่างอิสระ)</button>
+            <button type="button" class="btn-header-action" id="btn-unlock-go-assembly">🔧 เริ่มประกอบโดรน 12 ชิ้น</button>
+            <button type="button" class="btn-header-action" id="btn-unlock-go-flight">✈ บินอิสระ (Free Flight) ทันที</button>
+            <button type="button" class="btn-header-action" id="btn-unlock-go-eval">⭐ ทำแบบประเมินสื่อ (0–5) / CSV</button>
+          </div>
+        </div>
+      `;
+      bodyEl.querySelector('#btn-unlock-go-home').addEventListener('click', () => this.showScreen('home'));
+      bodyEl.querySelector('#btn-unlock-go-assembly').addEventListener('click', () => this.showScreen('assembly'));
+      bodyEl.querySelector('#btn-unlock-go-flight').addEventListener('click', () => this.launchFreeFlightSafe());
+      bodyEl.querySelector('#btn-unlock-go-eval').addEventListener('click', () => {
+        this.quizMode = 'eval';
+        this.showScreen('quiz');
+      });
+      return;
+    }
+
+    // 3. Active Unit Heading & 3-Step Sub-Stepper
+    if (headingEl) headingEl.innerText = `${unit.num}: ${unit.title}`;
+    const preDone = uProg.preScore !== null;
+    const lessonDone = Boolean(uProg.lessonDone);
+    const postDone = Boolean(uProg.postPassed);
+    subStepperEl.innerHTML = `
+      <span class="course-sub-pill ${stage === 'pre' ? 'active' : (preDone ? 'done' : '')}">
+        ${preDone && stage !== 'pre' ? '✓ ' : ''}① แบบทดสอบก่อนเรียน (10 ข้อ)${preDone ? ` · ${uProg.preScore}/10` : ''}
+      </span>
+      <span class="course-sub-arrow">→</span>
+      <span class="course-sub-pill ${stage === 'lesson' ? 'active' : (lessonDone ? 'done' : '')}">
+        ${lessonDone && stage !== 'lesson' ? '✓ ' : ''}② ศึกษาเนื้อหาบทเรียน
+      </span>
+      <span class="course-sub-arrow">→</span>
+      <span class="course-sub-pill ${stage === 'post' ? 'active' : (postDone ? 'done' : '')}">
+        ${postDone ? '✓ ' : ''}③ แบบทดสอบหลังเรียน (ต้องได้ ≥ ${passScore}/10)
+      </span>
+    `;
+
+    bodyEl.innerHTML = '';
+
+    // 4A. STAGE: LESSON CONTENT
+    if (stage === 'lesson') {
+      const contentWrap = document.createElement('div');
+      contentWrap.style.display = 'flex';
+      contentWrap.style.flexDirection = 'column';
+      contentWrap.style.gap = '14px';
+      this.renderUnitContentInto(contentWrap, unit);
+      bodyEl.appendChild(contentWrap);
+
+      const nextDesc = activeIdx < LEARNING_UNITS.length - 1
+        ? `ผ่านไปทำแบบทดสอบก่อนเรียน ${LEARNING_UNITS[activeIdx + 1].num}`
+        : 'ปลดล็อกเกมจำลองการบินอย่างอิสระ';
+
+      const footerCta = document.createElement('div');
+      footerCta.className = 'course-lesson-footer-cta';
+      footerCta.innerHTML = `
+        <div>
+          <h4>✅ เรียนเนื้อหา${unit.num}จบแล้วใช่ไหม?</h4>
+          <p>ขั้นต่อไปคือทำแบบทดสอบหลังเรียน ${unit.num} (10 ข้อ) — ต้องทำได้อย่างน้อย <b>${passScore} / 10 คะแนน</b> จึงจะ${nextDesc}ได้</p>
+        </div>
+        <button type="button" class="btn-header-action primary" id="btn-course-start-post">
+          📝 ไปทำแบบทดสอบหลังเรียน ${unit.num} (10 ข้อ) →
+        </button>
+      `;
+      bodyEl.appendChild(footerCta);
+
+      footerCta.querySelector('#btn-course-start-post').addEventListener('click', () => {
+        uProg.lessonDone = true;
+        this.courseProgress.currentStage = 'post';
+        this.courseQuizAnswers = {};
+        this.courseQuizSubmitted = false;
+        this.courseLastScore = null;
+        this.saveCourseProgress();
+        this.scrollCourseTop();
+        this.renderCourseScreen();
+      });
+      return;
+    }
+
+    // 4B. STAGE: PRE-TEST or POST-TEST (10 Questions for Active Unit)
+    const questions = UNIT_QUIZ_QUESTIONS[unit.id] || [];
+    const total = questions.length;
+    const isPre = stage === 'pre';
+    const isPost = stage === 'post';
+
+    const banner = document.createElement('div');
+    banner.className = `course-stage-banner ${isPost ? 'post-mode' : ''}`;
+    banner.innerHTML = `
+      <div>
+        <h3>${isPre ? `📝 ขั้นที่ 1/3 · แบบทดสอบก่อนเรียน ${unit.num} (${total} ข้อ)` : `🎯 ขั้นที่ 3/3 · แบบทดสอบหลังเรียน ${unit.num} (เกณฑ์ผ่าน ≥ ${passScore}/${total})`}</h3>
+        <p>${
+          isPre
+            ? `กรุณาทำแบบทดสอบก่อนเรียนให้ครบทั้ง ${total} ข้อเพื่อวัดพื้นฐาน จากนั้นระบบจะพาเข้าสู่เนื้อหาบทเรียน${unit.num}โดยอัตโนมัติ`
+            : `คะแนนก่อนเรียนของหน่วยนี้: <b>${uProg.preScore ?? 0} / ${total}</b> · ต้องได้หลังเรียนอย่างน้อย <b>${passScore} คะแนน</b> หากไม่ผ่านจะยังไม่สามารถไปหน่วยถัดไปได้`
+        }</p>
+      </div>
+      ${isPost && !this.courseQuizSubmitted ? `<button type="button" class="btn-header-action" id="btn-course-review-lesson">📖 กลับไปทบทวนเนื้อหา${unit.num}</button>` : ''}
+    `;
+    bodyEl.appendChild(banner);
+
+    const btnReviewTop = banner.querySelector('#btn-course-review-lesson');
+    if (btnReviewTop) {
+      btnReviewTop.addEventListener('click', () => {
+        this.courseProgress.currentStage = 'lesson';
+        this.courseQuizAnswers = {};
+        this.courseQuizSubmitted = false;
+        this.saveCourseProgress();
+        this.scrollCourseTop();
+        this.renderCourseScreen();
+      });
+    }
+
+    const goToNextAfterPostPass = () => {
+      this.courseReviewUnitIdx = null;
+      this.courseQuizAnswers = {};
+      this.courseQuizSubmitted = false;
+      this.courseLastScore = null;
+      this.scrollCourseTop();
+      this.showScreen('course');
+    };
+
+    const goToLessonFromPre = () => {
+      this.courseProgress.currentStage = 'lesson';
+      this.courseQuizAnswers = {};
+      this.courseQuizSubmitted = false;
+      this.courseLastScore = null;
+      this.saveCourseProgress();
+      this.scrollCourseTop();
+      this.renderCourseScreen();
+    };
+
+    const retryPostTest = () => {
+      this.courseQuizAnswers = {};
+      this.courseQuizSubmitted = false;
+      this.courseLastScore = null;
+      this.scrollCourseTop();
+      this.renderCourseScreen();
+    };
+
+    const backToLessonFromFail = () => {
+      this.courseProgress.currentStage = 'lesson';
+      this.courseQuizAnswers = {};
+      this.courseQuizSubmitted = false;
+      this.courseLastScore = null;
+      this.saveCourseProgress();
+      this.scrollCourseTop();
+      this.renderCourseScreen();
+    };
+
+    // Result Banner if submitted
+    const passedThisAttempt = isPost && this.courseQuizSubmitted && (this.courseLastScore >= passScore);
+    if (this.courseQuizSubmitted) {
+      const resCard = document.createElement('div');
+      if (isPre) {
+        resCard.className = 'course-result-card info';
+        resCard.innerHTML = `
+          <div>
+            <h4>📊 ผลแบบทดสอบก่อนเรียน ${unit.num}: ได้ ${this.courseLastScore} / ${total} คะแนน</h4>
+            <p>บันทึกคะแนนก่อนเรียนเรียบร้อยแล้ว กดปุ่มเพื่อเข้าสู่เนื้อหาบทเรียน${unit.num} (และเตรียมสอบหลังเรียนให้ได้อย่างน้อย ${passScore}/${total} คะแนน)</p>
+          </div>
+          <div class="course-result-actions">
+            <button type="button" class="btn-header-action primary" id="btn-pre-next-top">📖 เข้าสู่เนื้อหาบทเรียน ${unit.num} →</button>
+          </div>
+        `;
+        bodyEl.appendChild(resCard);
+        resCard.querySelector('#btn-pre-next-top').addEventListener('click', goToLessonFromPre);
+      } else if (passedThisAttempt) {
+        const diff = this.courseLastScore - (uProg.preScore ?? 0);
+        const nextBtnLabel = activeIdx < LEARNING_UNITS.length - 1
+          ? `🚀 ไปทำแบบทดสอบก่อนเรียน ${LEARNING_UNITS[activeIdx + 1].num} →`
+          : '🎉 ดูสรุปผลทั้ง 5 หน่วยและปลดล็อกเกม →';
+        resCard.className = 'course-result-card pass';
+        resCard.innerHTML = `
+          <div>
+            <h4>🎉 ผ่านเกณฑ์${unit.num}แล้ว! ได้ ${this.courseLastScore} / ${total} คะแนน</h4>
+            <p>คะแนนก่อนเรียน ${uProg.preScore ?? 0}/${total} → หลังเรียน ${this.courseLastScore}/${total} (พัฒนาการ ${diff >= 0 ? '+' : ''}${diff} คะแนน)${activeIdx < LEARNING_UNITS.length - 1 ? ` · ปลดล็อก${LEARNING_UNITS[activeIdx + 1].num}แล้ว!` : ' · ครบทั้ง 5 หน่วยแล้ว!'}</p>
+          </div>
+          <div class="course-result-actions">
+            <button type="button" class="btn-header-action primary" id="btn-post-next-top">${nextBtnLabel}</button>
+          </div>
+        `;
+        bodyEl.appendChild(resCard);
+        resCard.querySelector('#btn-post-next-top').addEventListener('click', goToNextAfterPostPass);
+      } else {
+        resCard.className = 'course-result-card fail';
+        resCard.innerHTML = `
+          <div>
+            <h4>❌ ยังไม่ผ่านเกณฑ์${unit.num} — ได้ ${this.courseLastScore} / ${total} คะแนน (ต้องได้อย่างน้อย ${passScore} / ${total})</h4>
+            <p>ยังไม่สามารถไปหน่วยถัดไปได้ กรุณากลับไปทบทวนเนื้อหา${unit.num}แล้วทำแบบทดสอบหลังเรียนใหม่อีกครั้ง</p>
+          </div>
+          <div class="course-result-actions">
+            <button type="button" class="btn-header-action primary" id="btn-fail-review-top">📖 กลับไปทบทวนเนื้อหา${unit.num}</button>
+            <button type="button" class="btn-header-action" id="btn-fail-retry-top">🔄 ทำแบบทดสอบหลังเรียนใหม่</button>
+          </div>
+        `;
+        bodyEl.appendChild(resCard);
+        resCard.querySelector('#btn-fail-review-top').addEventListener('click', backToLessonFromFail);
+        resCard.querySelector('#btn-fail-retry-top').addEventListener('click', retryPostTest);
+      }
+    }
+
+    // Render 10 Quiz Question Cards
+    questions.forEach((q, idx) => {
+      const card = document.createElement('div');
+      card.className = 'quiz-q-card';
+      const chosen = this.courseQuizAnswers[q.id];
+
+      const optsHtml = q.options.map((optText, oIdx) => {
+        let cls = 'quiz-opt-btn';
+        if (this.courseQuizSubmitted) {
+          if (passedThisAttempt) {
+            // Show full green answer key only when Post-test is PASSED
+            if (oIdx === q.answer) cls += ' correct';
+            else if (chosen === oIdx) cls += ' wrong';
+          } else if (isPost) {
+            // Post-test FAILED: mark user's right answers green & wrong picks red WITHOUT revealing unpicked correct answers!
+            if (chosen === oIdx) cls += (oIdx === q.answer ? ' correct' : ' wrong');
+          } else {
+            // Pre-test submitted: keep selected option neutral (don't spoil answer key before studying!)
+            if (chosen === oIdx) cls += ' selected';
+          }
+        } else if (chosen === oIdx) {
+          cls += ' selected';
+        }
+        return `<button type="button" class="${cls}" data-qid="${q.id}" data-oidx="${oIdx}">${['ก', 'ข', 'ค', 'ง'][oIdx]}. ${optText}</button>`;
+      }).join('');
+
+      const wrongHintHtml = (isPost && this.courseQuizSubmitted && !passedThisAttempt && chosen !== q.answer)
+        ? `<div class="quiz-wrong-hint">✕ ข้อนี้ยังไม่ถูกต้อง — กลับไปทบทวนเนื้อหา${unit.num}แล้วลองตอบใหม่</div>`
+        : '';
+
+      card.innerHTML = `
+        <div class="quiz-q-header">
+          <span class="quiz-q-unit">${unit.num}</span>
+          <span>ข้อ ${idx + 1}. ${q.question}</span>
+        </div>
+        <div class="quiz-options-grid">${optsHtml}</div>
+        ${wrongHintHtml}
+      `;
+
+      card.querySelectorAll('.quiz-opt-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (this.courseQuizSubmitted) return;
+          const oIdx = parseInt(btn.dataset.oidx, 10);
+          this.courseQuizAnswers[q.id] = oIdx;
+          // Smooth in-place highlight without rebuilding DOM or jumping scroll!
+          card.querySelectorAll('.quiz-opt-btn').forEach(b => {
+            b.classList.toggle('selected', parseInt(b.dataset.oidx, 10) === oIdx);
+          });
+          const cntEl = document.getElementById('course-answered-count');
+          if (cntEl) {
+            const doneNow = questions.filter(qq => this.courseQuizAnswers[qq.id] !== undefined).length;
+            cntEl.innerText = `ตอบแล้ว ${doneNow} / ${total} ข้อ`;
+          }
+        });
+      });
+
+      bodyEl.appendChild(card);
+    });
+
+    // Bottom Action / Submit Row
+    const submitRow = document.createElement('div');
+    submitRow.className = 'quiz-submit-row';
+    const answeredCount = questions.filter(qq => this.courseQuizAnswers[qq.id] !== undefined).length;
+
+    if (!this.courseQuizSubmitted) {
+      submitRow.innerHTML = `
+        <span id="course-answered-count" style="font-size:13px; color:var(--muted);">ตอบแล้ว ${answeredCount} / ${total} ข้อ</span>
+        <button type="button" class="btn-header-action primary" id="btn-course-submit-quiz">
+          ${isPre ? `ส่งคำตอบก่อนเรียน ${unit.num} →` : `ส่งคำตอบหลังเรียน ${unit.num} (ตรวจเกณฑ์ ≥ ${passScore}/${total}) →`}
+        </button>
+      `;
+      bodyEl.appendChild(submitRow);
+
+      submitRow.querySelector('#btn-course-submit-quiz').addEventListener('click', () => {
+        const unansweredIdx = questions.findIndex(qq => this.courseQuizAnswers[qq.id] === undefined);
+        if (unansweredIdx !== -1) {
+          const doneNow = questions.filter(qq => this.courseQuizAnswers[qq.id] !== undefined).length;
+          const cntEl = document.getElementById('course-answered-count');
+          if (cntEl) {
+            cntEl.style.color = '#fbbf24';
+            cntEl.innerHTML = `⚠️ กรุณาตอบให้ครบทั้ง ${total} ข้อก่อนส่งคำตอบ (ตอบแล้ว <b>${doneNow}/${total}</b> · ขาดข้อ ${unansweredIdx + 1})`;
+          }
+          const qCards = bodyEl.querySelectorAll('.quiz-q-card');
+          if (qCards[unansweredIdx]) {
+            qCards[unansweredIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            qCards[unansweredIdx].style.borderColor = '#f59e0b';
+          }
+          return;
+        }
+        let score = 0;
+        questions.forEach(q => {
+          if (this.courseQuizAnswers[q.id] === q.answer) score++;
+        });
+        this.courseLastScore = score;
+        this.courseQuizSubmitted = true;
+
+        if (isPre) {
+          uProg.preScore = score;
+          this.saveCourseProgress();
+        } else {
+          uProg.attempts = (uProg.attempts || 0) + 1;
+          uProg.postScore = score;
+          uProg.bestPostScore = Math.max(uProg.bestPostScore ?? -1, score);
+          if (score >= passScore) {
+            uProg.postPassed = true;
+            this.courseReviewUnitIdx = activeIdx;
+            if (activeIdx < LEARNING_UNITS.length - 1) {
+              this.courseProgress.currentUnitIndex = activeIdx + 1;
+              this.courseProgress.currentStage = 'pre';
+            } else {
+              this.courseProgress.courseCompleted = true;
+              this.courseProgress.completedAt = new Date().toLocaleString('th-TH');
+            }
+          }
+          this.saveCourseProgress();
+        }
+        this.scrollCourseTop();
+        this.renderCourseScreen();
+      });
+    } else if (isPre) {
+      submitRow.innerHTML = `
+        <span style="font-size:13px; color:#93c5fd;">คะแนนก่อนเรียน ${unit.num}: <b>${this.courseLastScore} / ${total}</b></span>
+        <button type="button" class="btn-header-action primary" id="btn-pre-next-bottom">📖 เข้าสู่เนื้อหาบทเรียน ${unit.num} →</button>
+      `;
+      bodyEl.appendChild(submitRow);
+      submitRow.querySelector('#btn-pre-next-bottom').addEventListener('click', goToLessonFromPre);
+    } else if (passedThisAttempt) {
+      const nextBtnLabel = activeIdx < LEARNING_UNITS.length - 1
+        ? `🚀 ไปทำแบบทดสอบก่อนเรียน ${LEARNING_UNITS[activeIdx + 1].num} →`
+        : '🎉 ดูสรุปผลทั้ง 5 หน่วยและปลดล็อกเกม →';
+      submitRow.innerHTML = `
+        <span style="font-size:13px; color:#4ade80;">✓ ผ่านเกณฑ์${unit.num} (${this.courseLastScore}/${total} คะแนน)</span>
+        <button type="button" class="btn-header-action primary" id="btn-post-next-bottom">${nextBtnLabel}</button>
+      `;
+      bodyEl.appendChild(submitRow);
+      submitRow.querySelector('#btn-post-next-bottom').addEventListener('click', goToNextAfterPostPass);
+    } else {
+      submitRow.innerHTML = `
+        <span style="font-size:13px; color:#fca5a5;">✕ ได้ ${this.courseLastScore}/${total} คะแนน (ต้อง ≥ ${passScore}/${total})</span>
+        <div class="course-result-actions">
+          <button type="button" class="btn-header-action primary" id="btn-fail-review-bottom">📖 กลับไปทบทวนเนื้อหา${unit.num}</button>
+          <button type="button" class="btn-header-action" id="btn-fail-retry-bottom">🔄 ทำแบบทดสอบหลังเรียนใหม่</button>
+        </div>
+      `;
+      bodyEl.appendChild(submitRow);
+      submitRow.querySelector('#btn-fail-review-bottom').addEventListener('click', backToLessonFromFail);
+      submitRow.querySelector('#btn-fail-retry-bottom').addEventListener('click', retryPostTest);
     }
   }
 
+  renderLessonsScreen() {
+    const tabsEl = document.getElementById('learning-unit-tabs');
+    const bodyEl = document.getElementById('learning-unit-content');
+    const partsRowsEl = document.getElementById('lesson-rows-container');
+    if (!tabsEl || !bodyEl || typeof LEARNING_UNITS === 'undefined') return;
+
+    tabsEl.innerHTML = '';
+    LEARNING_UNITS.forEach(u => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `unit-tab-btn ${this.activeUnitId === u.id ? 'active' : ''}`;
+      const passedMark = this.courseProgress?.units?.[u.id]?.postPassed ? ' ✓' : '';
+      btn.innerHTML = `<b>${u.num}${passedMark}</b> <span>${u.title}</span>`;
+      btn.addEventListener('click', () => {
+        this.activeUnitId = u.id;
+        this.renderLessonsScreen();
+        document.querySelectorAll('.nav-tab-btn').forEach(nb => {
+          if (nb.id === 'btn-nav-thai-law') nb.classList.toggle('active', this.activeUnitId === 'unit5');
+          else if (nb.dataset.screen === 'lessons') nb.classList.toggle('active', this.activeUnitId !== 'unit5');
+        });
+      });
+      tabsEl.appendChild(btn);
+    });
+
+    const unit = LEARNING_UNITS.find(u => u.id === this.activeUnitId) || LEARNING_UNITS[0];
+    this.renderUnitContentInto(bodyEl, unit, partsRowsEl);
+  }
+
   renderQuizScreen() {
-    if (typeof QUIZ_QUESTIONS === 'undefined') return;
+    if (typeof QUIZ_QUESTIONS === 'undefined' || typeof UNIT_QUIZ_QUESTIONS === 'undefined') return;
+    const passScore = typeof QUIZ_PASS_SCORE !== 'undefined' ? QUIZ_PASS_SCORE : 7;
 
     const btnPre = document.getElementById('btn-quiz-pre');
     const btnPost = document.getElementById('btn-quiz-post');
@@ -1850,29 +2681,31 @@ class DroneApp {
     if (btnComp) btnComp.classList.toggle('primary', this.quizMode === 'compare');
     if (btnEval) btnEval.classList.toggle('primary', this.quizMode === 'eval');
 
-    // Score Comparison Header Cards
+    this.syncAggregateScoresFromCourse();
+
+    // Score Comparison Header Cards (Aggregate across all 5 units = 50 questions)
     const compEl = document.getElementById('quiz-compare-panel');
     const preVal = this.savedScores.pre;
     const postVal = this.savedScores.post;
-    const total = QUIZ_QUESTIONS.length;
+    const totalAll = QUIZ_QUESTIONS.length;
     let diffText = 'รอทำครบทั้ง 2 รอบ';
     if (preVal !== null && postVal !== null) {
       const diff = postVal - preVal;
-      const pct = Math.round((diff / total) * 100);
+      const pct = Math.round((diff / totalAll) * 100);
       diffText = diff >= 0 ? `+${diff} คะแนน (+${pct}%)` : `${diff} คะแนน (${pct}%)`;
     }
 
     compEl.innerHTML = `
       <div class="quiz-score-card">
-        <small>คะแนนก่อนเรียน (Pre-test)</small>
-        <strong>${preVal !== null ? `${preVal} / ${total}` : 'ยังไม่ทำ'}</strong>
+        <small>คะแนนก่อนเรียนรวม 5 หน่วย (Pre-test)</small>
+        <strong>${preVal !== null ? `${preVal} / ${totalAll}` : 'ยังไม่ทำ'}</strong>
       </div>
       <div class="quiz-score-card">
-        <small>คะแนนหลังเรียน (Post-test)</small>
-        <strong>${postVal !== null ? `${postVal} / ${total}` : 'ยังไม่ทำ'}</strong>
+        <small>คะแนนหลังเรียนรวม 5 หน่วย (Post-test)</small>
+        <strong>${postVal !== null ? `${postVal} / ${totalAll}` : 'ยังไม่ทำ'}</strong>
       </div>
       <div class="quiz-score-card highlight">
-        <small>พัฒนาการเรียนรู้ (เปรียบเทียบ)</small>
+        <small>พัฒนาการเรียนรู้รวม (5 หน่วย)</small>
         <strong>${diffText}</strong>
       </div>
     `;
@@ -1884,25 +2717,29 @@ class DroneApp {
       const summary = document.createElement('div');
       summary.className = 'unit-section-card';
       summary.innerHTML = `
-        <h4>สรุปผลการเปรียบเทียบคะแนนก่อนเรียนและหลังเรียน</h4>
-        <p>${
-          preVal === null
-            ? 'กรุณาทำแบบทดสอบก่อนเรียน (Pre-test) ก่อนเริ่มศึกษาบทเรียนทั้ง 6 หน่วย (รวมกฎหมายโดรนไทย)'
-            : postVal === null
-              ? `คุณได้คะแนนก่อนเรียน ${preVal}/${total} คะแนน — เมื่อศึกษาบทเรียน 6 หน่วย (รวมกฎหมายไทย CAAT/กสทช.) และทดลองประกอบ-บินโดรนแล้ว ให้กดทำแบบทดสอบหลังเรียน (Post-test) เพื่อเปรียบเทียบผล`
-              : `คะแนนก่อนเรียน: ${preVal}/${total} (${Math.round((preVal / total) * 100)}%) • คะแนนหลังเรียน: ${postVal}/${total} (${Math.round((postVal / total) * 100)}%) • ผลต่างพัฒนาการ: ${diffText}`
+        <h4>📊 สรุปผลคะแนนก่อนเรียน–หลังเรียนทั้ง 5 หน่วยการเรียนรู้ (เกณฑ์ผ่าน ≥ ${passScore}/10 ต่อหน่วย)</h4>
+        <p style="margin-bottom:12px;">${
+          this.courseProgress.courseCompleted
+            ? `คุณผ่านครบทั้ง 5 หน่วยการเรียนรู้และปลดล็อกโหมดเล่นเกมอิสระแล้ว · คะแนนรวมก่อนเรียน ${preVal ?? 0}/${totalAll} → หลังเรียน ${postVal ?? 0}/${totalAll} (${diffText})`
+            : 'ติดตามผลคะแนนก่อนเรียนและหลังเรียนแยกตามหน่วย'
         }</p>
-        <div style="display:flex; gap:10px; margin-top:8px;">
-          <button class="btn-header-action primary" id="btn-cmp-go-lessons">📖 กลับไปทบทวนบทเรียน 6 หน่วย</button>
-          <button class="btn-header-action" id="btn-cmp-reset-scores">↺ ล้างคะแนนเพื่อทดสอบใหม่</button>
+        ${this.buildFiveUnitScoreTableHTML()}
+        <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+          <button type="button" class="btn-header-action primary" id="btn-cmp-go-lessons">📖 ทบทวนบทเรียน 5 หน่วย</button>
+          <button type="button" class="btn-header-action" id="btn-cmp-go-eval">⭐ ทำแบบประเมินสื่อ (0–5) / CSV</button>
+          <button type="button" class="btn-header-action" id="btn-cmp-reset-course">🔒 เริ่มหลักสูตรบังคับใหม่ตั้งแต่หน่วยที่ 1</button>
         </div>
       `;
       qBox.appendChild(summary);
       summary.querySelector('#btn-cmp-go-lessons').addEventListener('click', () => this.showScreen('lessons'));
-      summary.querySelector('#btn-cmp-reset-scores').addEventListener('click', () => {
-        this.savedScores = { pre: null, post: null };
-        this.saveScores();
+      summary.querySelector('#btn-cmp-go-eval').addEventListener('click', () => {
+        this.quizMode = 'eval';
         this.renderQuizScreen();
+      });
+      summary.querySelector('#btn-cmp-reset-course').addEventListener('click', () => {
+        if (confirm('ต้องการล้างความคืบหน้าและเริ่มเข้าสู่หลักสูตรบังคับใหม่ตั้งแต่ "แบบทดสอบก่อนเรียน หน่วยที่ 1" ใช่หรือไม่?')) {
+          this.resetMandatoryCourse();
+        }
       });
       return;
     }
@@ -1918,7 +2755,7 @@ class DroneApp {
 
       evalCard.innerHTML = `
         <h4>⭐ แบบประเมินความพึงพอใจสื่อการเรียนรู้โดรน (ระดับคะแนน 0 – 5)</h4>
-        <p>เกณฑ์การให้คะแนน: <b>5</b> = มากที่สุด · <b>4</b> = มาก · <b>3</b> = ปานกลาง · <b>2</b> = น้อย · <b>1</b> = น้อยที่สุด · <b>0</b> = ควรปรับปรุงอย่างยิ่ง (ระบบจะบันทึกคู่กับคะแนน Pre-test / Post-test ลงในฐานข้อมูลเครื่องอัตโนมัติ)</p>
+        <p>เกณฑ์การให้คะแนน: <b>5</b> = มากที่สุด · <b>4</b> = มาก · <b>3</b> = ปานกลาง · <b>2</b> = น้อย · <b>1</b> = น้อยที่สุด · <b>0</b> = ควรปรับปรุงอย่างยิ่ง (ระบบจะบันทึกคู่กับคะแนน Pre-test / Post-test ทั้ง 5 หน่วยลงในฐานข้อมูลเครื่องอัตโนมัติ)</p>
         <div class="eval-student-row">
           <input type="text" class="eval-input" id="eval-input-name" placeholder="ชื่อ-นามสกุลผู้ประเมิน (เช่น นายสมชาย ใจดี)" value="${this.evalForm.name}">
           <input type="text" class="eval-input" id="eval-input-id" placeholder="รหัสนักศึกษา / ระดับชั้น (เช่น ปวช.3 ชค.)" value="${this.evalForm.studentId}">
@@ -1969,12 +2806,21 @@ class DroneApp {
       evalCard.querySelector('#btn-save-eval').addEventListener('click', () => {
         const vals = criteriaList.map(c => this.evalForm.ratings[c.id] ?? 0);
         const avg = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '0.00';
+        const unitScores = {};
+        LEARNING_UNITS.forEach(u => {
+          const up = this.courseProgress.units[u.id] || {};
+          unitScores[u.id] = {
+            pre: up.preScore,
+            post: up.bestPostScore !== null && up.bestPostScore !== undefined ? up.bestPostScore : up.postScore
+          };
+        });
         this.evalRecords.push({
           timestamp: new Date().toLocaleString('th-TH'),
           name: this.evalForm.name.trim() || `ผู้ทดสอบคนที่ ${this.evalRecords.length + 1}`,
           studentId: this.evalForm.studentId.trim() || '-',
           pre: this.savedScores.pre,
           post: this.savedScores.post,
+          unitScores,
           ratings: { ...this.evalForm.ratings },
           avg
         });
@@ -2000,7 +2846,29 @@ class DroneApp {
       return;
     }
 
-    QUIZ_QUESTIONS.forEach((q, idx) => {
+    // Unlocked Per-Unit Retake Mode ('pre' or 'post') — choose Unit 1..5
+    const unitSelBar = document.createElement('div');
+    unitSelBar.className = 'quiz-unit-selector-bar';
+    LEARNING_UNITS.forEach(u => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `btn-header-action ${this.quizSelectedUnitId === u.id ? 'primary' : ''}`;
+      btn.innerText = `${u.num}: ${u.shortLabel || u.title}`;
+      btn.addEventListener('click', () => {
+        this.quizSelectedUnitId = u.id;
+        this.quizAnswers = {};
+        this.quizSubmitted = false;
+        this.renderQuizScreen();
+      });
+      unitSelBar.appendChild(btn);
+    });
+    qBox.appendChild(unitSelBar);
+
+    const activeUnit = LEARNING_UNITS.find(u => u.id === this.quizSelectedUnitId) || LEARNING_UNITS[0];
+    const unitQuestions = UNIT_QUIZ_QUESTIONS[activeUnit.id] || [];
+    const total = unitQuestions.length;
+
+    unitQuestions.forEach((q, idx) => {
       const card = document.createElement('div');
       card.className = 'quiz-q-card';
       const chosen = this.quizAnswers[q.id];
@@ -2018,7 +2886,7 @@ class DroneApp {
 
       card.innerHTML = `
         <div class="quiz-q-header">
-          <span class="quiz-q-unit">${q.unit}</span>
+          <span class="quiz-q-unit">${activeUnit.num}</span>
           <span>ข้อ ${idx + 1}. ${q.question}</span>
         </div>
         <div class="quiz-options-grid">${optsHtml}</div>
@@ -2027,8 +2895,16 @@ class DroneApp {
       card.querySelectorAll('.quiz-opt-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           if (this.quizSubmitted) return;
-          this.quizAnswers[q.id] = parseInt(btn.dataset.oidx, 10);
-          this.renderQuizScreen();
+          const oIdx = parseInt(btn.dataset.oidx, 10);
+          this.quizAnswers[q.id] = oIdx;
+          card.querySelectorAll('.quiz-opt-btn').forEach(b => {
+            b.classList.toggle('selected', parseInt(b.dataset.oidx, 10) === oIdx);
+          });
+          const cntEl = document.getElementById('unlocked-quiz-answered');
+          if (cntEl) {
+            const doneNow = unitQuestions.filter(qq => this.quizAnswers[qq.id] !== undefined).length;
+            cntEl.innerText = `ตอบแล้ว ${doneNow} / ${total} ข้อ`;
+          }
         });
       });
 
@@ -2037,11 +2913,11 @@ class DroneApp {
 
     const submitRow = document.createElement('div');
     submitRow.className = 'quiz-submit-row';
-    const answeredCount = Object.keys(this.quizAnswers).length;
+    const answeredCount = unitQuestions.filter(qq => this.quizAnswers[qq.id] !== undefined).length;
     submitRow.innerHTML = `
-      <span style="font-size:12.5px; color:var(--muted);">ตอบแล้ว ${answeredCount} / ${total} ข้อ</span>
+      <span id="unlocked-quiz-answered" style="font-size:12.5px; color:var(--muted);">ตอบแล้ว ${answeredCount} / ${total} ข้อ</span>
       <button type="button" class="btn-header-action primary" id="btn-submit-quiz">
-        ${this.quizSubmitted ? '📊 ดูผลเปรียบเทียบคะแนน →' : `ส่งคำตอบ${this.quizMode === 'pre' ? 'ก่อนเรียน (Pre-test)' : 'หลังเรียน (Post-test)'}`}
+        ${this.quizSubmitted ? '📊 ดูผลเปรียบเทียบ 5 หน่วย →' : `ส่งคำตอบ${this.quizMode === 'pre' ? 'ก่อนเรียน' : 'หลังเรียน'} ${activeUnit.num}`}
       </button>
     `;
     qBox.appendChild(submitRow);
@@ -2052,22 +2928,35 @@ class DroneApp {
         this.renderQuizScreen();
         return;
       }
-      if (answeredCount < total) {
-        alert(`กรุณาตอบให้ครบทั้ง ${total} ข้อก่อนส่งคำตอบ (ตอบแล้ว ${answeredCount}/${total} ข้อ)`);
+      const doneNow = unitQuestions.filter(qq => this.quizAnswers[qq.id] !== undefined).length;
+      if (doneNow < total) {
+        alert(`กรุณาตอบให้ครบทั้ง ${total} ข้อก่อนส่งคำตอบ (ตอบแล้ว ${doneNow}/${total} ข้อ)`);
         return;
       }
       let score = 0;
-      QUIZ_QUESTIONS.forEach(q => {
+      unitQuestions.forEach(q => {
         if (this.quizAnswers[q.id] === q.answer) score++;
       });
-      this.savedScores[this.quizMode] = score;
-      this.saveScores();
+      const uProg = this.courseProgress.units[activeUnit.id];
+      if (uProg) {
+        if (this.quizMode === 'pre') {
+          uProg.preScore = score;
+        } else {
+          uProg.postScore = score;
+          uProg.bestPostScore = Math.max(uProg.bestPostScore ?? -1, score);
+        }
+        this.saveCourseProgress();
+      }
       this.quizSubmitted = true;
       this.renderQuizScreen();
     });
   }
 
   launchFlight(mission) {
+    if (!this.courseProgress || !this.courseProgress.courseCompleted) {
+      this.showScreen('course');
+      return;
+    }
     const stats = calculateDroneStats(this.assembly);
     this.selectedMission = mission;
 
@@ -2086,7 +2975,7 @@ class DroneApp {
 
     const btnCam = document.getElementById('btn-toggle-camera');
     if (btnCam) {
-      btnCam.innerText = this.flightSim.isFPV ? '📷 FPV' : '📷 มุมมองที่ 3';
+      btnCam.innerText = this.flightSim.isFPV ? '📷 FPV (V)' : '📷 มุมมองที่ 3 (V)';
       btnCam.classList.toggle('primary', this.flightSim.isFPV);
     }
     const reticle = document.getElementById('fpv-crosshair-hud');
@@ -2097,9 +2986,88 @@ class DroneApp {
 
   updateFlightHUD(telemetry) {
     const targetAlt = this.selectedMission && this.selectedMission.targetAlt;
+    const aglVal = typeof telemetry.groundClearanceM === 'number' ? telemetry.groundClearanceM : telemetry.altitude;
+    const homeAltVal = typeof telemetry.homeAltitudeM === 'number' ? telemetry.homeAltitudeM : telemetry.altitude;
+    const altLimitM = telemetry.maxAltitudeLimitM || 90;
     document.getElementById('hud-alt-val').innerText = targetAlt
       ? `${telemetry.altitude} ม. / ${targetAlt}`
-      : `${telemetry.altitude} ม.`;
+      : `${telemetry.altitude} / ${altLimitM} ม.`;
+
+    const altTile = document.getElementById('hud-alt-tile');
+    const altSub = document.getElementById('hud-alt-sub');
+    if (altTile) {
+      altTile.classList.toggle('alt-warn-ceiling', Boolean(telemetry.lawOverCeiling || telemetry.hitAltitudeLimit));
+    }
+    if (altSub) {
+      const sType = telemetry.altSensorType || 'BARO';
+      if (telemetry.lawOverCeiling) {
+        altSub.innerText = '⚠️ เกินเพดาน 90ม. (กพท.)';
+      } else if (telemetry.hitAltitudeLimit) {
+        altSub.innerText = `🛑 ลิมิตสูงสุด ${altLimitM}ม.`;
+      } else if (sType === 'RADAR+TOF') {
+        altSub.innerText = telemetry.altSensorLocked
+          ? `📡 พื้น ${aglVal.toFixed(1)}ม · ฐาน ${homeAltVal.toFixed(1)}ม`
+          : `BARO · ฐาน ${homeAltVal.toFixed(1)}ม`;
+      } else if (sType === 'SONAR') {
+        altSub.innerText = telemetry.altSensorLocked
+          ? `🔊 Sonar พื้น ${aglVal.toFixed(2)}ม`
+          : `BARO · เกินระยะ Sonar (>6ม)`;
+      } else if (sType === 'BARO') {
+        altSub.innerText = `BARO · ฐาน ${homeAltVal.toFixed(1)}ม`;
+      } else {
+        altSub.innerText = 'MANUAL F4 (ไม่มี Baro)';
+      }
+    }
+
+    // Update live 360° LiDAR / mmWave Radar & Downward Sonar Tile (#hud-sensor-tile)
+    const sensorTile = document.getElementById('hud-sensor-tile');
+    const sensorLbl = document.getElementById('hud-sensor-label');
+    const sensorVal = document.getElementById('hud-sensor-val');
+    const sensorSub = document.getElementById('hud-sensor-sub');
+    if (sensorTile && sensorVal && sensorSub) {
+      sensorTile.classList.remove('sensor-clear', 'sensor-sonar', 'sensor-detect', 'sensor-brake');
+      if (telemetry.isRTHMode && (telemetry.isFailsafeReturn || telemetry.sensorLostSim)) {
+        if (sensorLbl) sensorLbl.innerText = 'AUTO-RETURN';
+        sensorTile.classList.add('sensor-brake');
+        sensorVal.innerText = telemetry.rthPhase === 'DESCEND' ? 'ลงจอดจุด H' : `เหลือ ${telemetry.distFromHomeM || 0} ม.`;
+        sensorSub.innerText = telemetry.rthPhase === 'DESCEND'
+          ? 'คำนวณเส้นทางถึงฐานแล้ว'
+          : `${telemetry.rthWaypointsRemaining || 1} จุด · ${telemetry.sensorLostSim ? 'ย้อนรอย+A*' : 'A* กลับฐาน'}`;
+      } else if (telemetry.hasLidar) {
+        if (sensorLbl) sensorLbl.innerText = telemetry.isSpraying ? 'mmWave Radar' : 'LiDAR / Radar';
+        const lZone = telemetry.lidarZone || 'clear';
+        const lDist = telemetry.lidarNearestDist;
+        const lTag = telemetry.lidarNearestTag || 'สิ่งกีดขวาง';
+        const lDir = telemetry.lidarNearestDirTh || '';
+        if (lZone === 'brake' && lDist !== null && lDist !== undefined) {
+          sensorTile.classList.add('sensor-brake');
+          sensorVal.innerText = `เบรก! ${lDist.toFixed(1)} ม.`;
+          sensorSub.innerText = `${lTag}${lDir ? ' · ' + lDir : ''}`;
+        } else if (lZone === 'detect' && lDist !== null && lDist !== undefined) {
+          sensorTile.classList.add('sensor-detect');
+          sensorVal.innerText = `พบ ${lDist.toFixed(1)} ม.`;
+          sensorSub.innerText = `${lTag}${lDir ? ' · ' + lDir : ''}`;
+        } else {
+          sensorTile.classList.add('sensor-clear');
+          sensorVal.innerText = telemetry.isSpraying ? 'Radar โล่ง' : 'โล่ง >14ม.';
+          sensorSub.innerText = telemetry.isSpraying ? 'ทะลุละอองปุ๋ย 360°' : 'สแกน 360° + วัดพื้น';
+        }
+      } else if (telemetry.hasOpticalFlow) {
+        if (sensorLbl) sensorLbl.innerText = 'Sonar / VPS';
+        if (telemetry.altSensorLocked) {
+          sensorTile.classList.add('sensor-sonar');
+          sensorVal.innerText = `พื้น ${aglVal.toFixed(2)} ม.`;
+          sensorSub.innerText = 'Optical Flow + Sonar';
+        } else {
+          sensorVal.innerText = '> 6.0 ม.';
+          sensorSub.innerText = 'เกินระยะ Sonar ใต้ท้อง';
+        }
+      } else {
+        if (sensorLbl) sensorLbl.innerText = 'LiDAR / Radar';
+        sensorVal.innerText = 'ไม่ได้ติด';
+        sensorSub.innerText = 'ติดเพิ่มที่ช่อง 10';
+      }
+    }
     document.getElementById('hud-speed-val').innerText = `${telemetry.speedKmh} กม./ชม.`;
 
     if (this.selectedMission && this.selectedMission.timeLimit) {
@@ -2184,6 +3152,148 @@ class DroneApp {
       btnGfx.innerText = gfxTexts[telemetry.graphicsQuality] || '⚖️ สมดุล';
       btnGfx.classList.toggle('primary', telemetry.graphicsQuality === 'fast');
     }
+    const btnWind = document.getElementById('btn-hud-wind');
+    if (btnWind && telemetry.windPresetShort) {
+      btnWind.innerText = telemetry.windPresetShort;
+      btnWind.classList.toggle('primary', telemetry.windPreset === 'strong' || telemetry.windPreset === 'storm');
+    }
+    const btnFailsafe = document.getElementById('btn-hud-failsafe');
+    if (btnFailsafe) {
+      const failActive = Boolean(telemetry.sensorLostSim || (telemetry.isRTHMode && telemetry.isFailsafeReturn));
+      btnFailsafe.classList.toggle('danger-kill', failActive);
+      btnFailsafe.innerText = failActive ? '📡 กู้สัญญาณ (P)' : '📡 สัญญาณหาย (P)';
+    }
+
+    // Update live Wind Compass & Speed Indicator Pill (#hud-wind-pill)
+    const windLevel = telemetry.windLevel || 'calm';
+    const windSpd = telemetry.liveWindSpeed || 0;
+    const windDirsTh = ['เหนือ', 'ตอ.เฉียงเหนือ', 'ตะวันออก', 'ตอ.เฉียงใต้', 'ใต้', 'ตต.เฉียงใต้', 'ตะวันตก', 'ตต.เฉียงเหนือ'];
+    const windDirName = windDirsTh[Math.round(((telemetry.liveWindDirDeg || 0) % 360) / 45) % 8];
+    const windPill = document.getElementById('hud-wind-pill');
+    const windArrow = document.getElementById('hud-wind-arrow');
+    const windText = document.getElementById('hud-wind-text');
+    if (windPill && windText) {
+      windPill.className = `hud-wind-pill ${windLevel}`;
+      const shelterTag = (telemetry.windShelterPct || 0) >= 35 ? ' · บังลม' : '';
+      const gustTag = telemetry.windGustActive ? ' กระโชก!' : '';
+      windText.innerText = `${windSpd.toFixed(1)} ม./วิ${gustTag}${shelterTag}`;
+      if (windArrow && typeof telemetry.windScreenDeg === 'number') {
+        windArrow.style.transform = `rotate(${telemetry.windScreenDeg}deg)`;
+      }
+      windPill.title = `แรงลม ${windSpd.toFixed(1)} ม./วิ · พัดไปทิศ${windDirName} (${telemetry.liveWindDirDeg || 0}°) · แรงลมแนวดิ่ง ${telemetry.liveWindVertical || 0} ม./วิ${shelterTag ? ` · ที่กำบังลดลม ${telemetry.windShelterPct}%` : ''} (กด N เปลี่ยนระดับลม)`;
+    }
+
+    // Live Rich First-Person View (FPV) Avionics & Camera Optics HUD Updates
+    const fpvHud = document.getElementById('fpv-crosshair-hud');
+    if (fpvHud && telemetry.isFPV) {
+      fpvHud.classList.remove('hidden');
+      const camType = telemetry.cameraType || 'gimbal_4k';
+      fpvHud.classList.toggle('cam-thermal', camType === 'thermal');
+      fpvHud.classList.toggle('cam-ndvi', camType === 'ndvi');
+
+      const pitchDeg = Math.round(((telemetry.pitch || 0) * 180) / Math.PI);
+      const rollDeg = Math.round(((telemetry.roll || 0) * 180) / Math.PI);
+
+      // 1. Artificial Horizon & Pitch Ladder (tilts with -roll and shifts with pitch!)
+      const hGroup = document.getElementById('fpv-horizon-group');
+      if (hGroup) {
+        const pitchPx = Math.max(-95, Math.min(95, pitchDeg * 3.8));
+        hGroup.style.transform = `rotate(${-rollDeg}deg) translateY(${pitchPx}px)`;
+      }
+
+      // 2. Camera Spec & Gimbal / Tilt Readout
+      const camSpecEl = document.getElementById('fpv-cam-spec');
+      if (camSpecEl) {
+        const specMap = {
+          fpv: 'LIVE · FPV 5.8GHz · ACRO 20°',
+          ndvi: 'REC · MULTISPECTRAL NDVI · GIMBAL',
+          thermal: 'REC · THERMAL FLIR IR · DUAL',
+          gimbal_4k: 'REC · 4K 60FPS · 3-AXIS GIMBAL'
+        };
+        camSpecEl.innerText = specMap[camType] || 'REC · 4K 60FPS · GIMBAL';
+      }
+      const camTiltEl = document.getElementById('fpv-cam-tilt');
+      if (camTiltEl) {
+        const stabTag = telemetry.hasGimbal ? 'GIMBAL LOCK' : 'FIXED CAM';
+        camTiltEl.innerText = `${stabTag} · P:${pitchDeg >= 0 ? '+' : ''}${pitchDeg}° R:${rollDeg >= 0 ? '+' : ''}${rollDeg}°`;
+      }
+
+      // 3. Compass Heading & Live Home Return Arrow
+      const yawDeg = typeof telemetry.yawDeg === 'number' ? telemetry.yawDeg : 0;
+      const cardinals = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      const cIdx = Math.round(yawDeg / 45) % 8;
+      const hdgValEl = document.getElementById('fpv-hdg-val');
+      const hdgLEl = document.getElementById('fpv-hdg-left');
+      const hdgREl = document.getElementById('fpv-hdg-right');
+      if (hdgValEl) hdgValEl.innerText = `${cardinals[cIdx]} · ${String(yawDeg).padStart(3, '0')}°`;
+      if (hdgLEl) hdgLEl.innerText = cardinals[(cIdx + 7) % 8];
+      if (hdgREl) hdgREl.innerText = cardinals[(cIdx + 1) % 8];
+
+      const homeArrowEl = document.getElementById('fpv-home-arrow');
+      const homeDistEl = document.getElementById('fpv-home-dist');
+      if (homeArrowEl && typeof telemetry.homeRelBearingDeg === 'number') {
+        homeArrowEl.style.transform = `rotate(${telemetry.homeRelBearingDeg}deg)`;
+      }
+      if (homeDistEl) {
+        homeDistEl.innerText = `HOME ${telemetry.distFromHomeM || 0} ม.`;
+      }
+
+      // 4. Left Speed / Throttle / Wind Tape
+      const spdEl = document.getElementById('fpv-spd-val');
+      const thrBar = document.getElementById('fpv-thr-bar');
+      const thrVal = document.getElementById('fpv-thr-val');
+      const windMini = document.getElementById('fpv-wind-mini');
+      if (spdEl) spdEl.innerText = `${telemetry.speedKmh || 0}`;
+      const thrPct = telemetry.throttlePct || 0;
+      if (thrBar) thrBar.style.width = `${thrPct}%`;
+      if (thrVal) thrVal.innerText = `THR ${thrPct}%`;
+      if (windMini) windMini.innerText = `ลม ${windSpd.toFixed(1)} ม./วิ`;
+
+      // 5. Right Altitude AGL / Vertical Speed / Sensor Tape
+      const fAltVal = document.getElementById('fpv-alt-val');
+      const fAltLim = document.getElementById('fpv-alt-limit-tag');
+      const fVsVal = document.getElementById('fpv-vs-val');
+      const fAltSens = document.getElementById('fpv-alt-sensor-mini');
+      if (fAltVal) fAltVal.innerText = `${aglVal.toFixed(1)}`;
+      if (fAltLim) fAltLim.innerText = `/ ${altLimitM} ม.`;
+      const vs = telemetry.verticalSpeedMs || 0;
+      if (fVsVal) fVsVal.innerText = `V/S ${vs >= 0 ? '+' : ''}${vs.toFixed(1)} ม./วิ`;
+      if (fAltSens) {
+        const sType = telemetry.altSensorType || 'BARO';
+        fAltSens.innerText = telemetry.altSensorLocked ? `${sType} ล็อกพื้น` : `ฐาน ${homeAltVal.toFixed(1)} ม.`;
+      }
+
+      // 6. Bottom Avionics Strip (Cell Voltage, Link, LiDAR Proximity Alert)
+      const avPwr = document.getElementById('fpv-av-power');
+      const avLink = document.getElementById('fpv-av-link');
+      const avLidar = document.getElementById('fpv-av-lidar');
+      if (avPwr) {
+        const vTotal = telemetry.batteryVoltage ? telemetry.batteryVoltage.toFixed(1) : '0.0';
+        const vCell = telemetry.cellVoltage ? telemetry.cellVoltage.toFixed(2) : '0.00';
+        avPwr.innerText = `⚡ ${telemetry.cells || 4}S ${vTotal}V (${vCell}V/c) · ${telemetry.currentAmps || 0}A`;
+        avPwr.className = `fpv-av-chip ${telemetry.batteryPercent < 22 ? 'danger' : telemetry.batteryPercent < 35 ? 'warn' : ''}`;
+      }
+      if (avLink) {
+        const rssiNow = typeof telemetry.rssiPercent === 'number' ? telemetry.rssiPercent : 100;
+        avLink.innerText = `📡 RX ${rssiNow}% · ${telemetry.flightModeLabel || 'GPS'}`;
+        avLink.className = `fpv-av-chip ${rssiNow <= 35 ? 'danger' : rssiNow <= 65 ? 'warn' : ''}`;
+      }
+      if (avLidar) {
+        if (!telemetry.hasLidar) {
+          avLidar.innerText = telemetry.hasOpticalFlow ? `🔊 Sonar ${aglVal.toFixed(1)} ม.` : '🛡️ ไม่มี LiDAR';
+          avLidar.className = 'fpv-av-chip';
+        } else if (telemetry.lidarZone === 'brake' && telemetry.lidarNearestDist !== null) {
+          avLidar.innerText = `🛑 เบรก! ${telemetry.lidarNearestTag || 'สิ่งกีดขวาง'} ${telemetry.lidarNearestDist.toFixed(1)} ม. (${telemetry.lidarNearestDirTh || ''})`;
+          avLidar.className = 'fpv-av-chip danger';
+        } else if (telemetry.lidarZone === 'detect' && telemetry.lidarNearestDist !== null) {
+          avLidar.innerText = `⚠️ ${telemetry.lidarNearestTag || 'สิ่งกีดขวาง'} ${telemetry.lidarNearestDist.toFixed(1)} ม. (${telemetry.lidarNearestDirTh || ''})`;
+          avLidar.className = 'fpv-av-chip warn';
+        } else {
+          avLidar.innerText = '🛡️ LiDAR 360° โล่ง';
+          avLidar.className = 'fpv-av-chip';
+        }
+      }
+    }
     const fpsEl = document.getElementById('hud-fps-badge');
     if (fpsEl && telemetry.fps) {
       fpsEl.innerText = `${telemetry.fps} FPS`;
@@ -2191,6 +3301,64 @@ class DroneApp {
     if (btnRcArm) {
       btnRcArm.classList.toggle('armed', telemetry.isArmed);
       btnRcArm.innerText = pState === 'PRE_ARMING' ? '⚙️ CHECK' : telemetry.isArmed ? '⏹ STOP' : '▶ START';
+    }
+
+    // Update live RF Signal Indicator Pill (4 bars + glowing LED dot + dead-zone cause!)
+    const sigState = telemetry.signalState || 'good';
+    const sigSource = telemetry.signalSource || 'clear';
+    const rssiVal = typeof telemetry.rssiPercent === 'number' ? telemetry.rssiPercent : 100;
+    const sigSourceLabels = {
+      sensor_lost: 'เซนเซอร์/สัญญาณขาดหายกลางทาง',
+      tree: 'ต้นไม้/พุ่มไม้บังสัญญาณ',
+      hangar: telemetry.insideMetalRoof ? 'ในโรงเก็บโลหะ (Faraday Cage)' : 'หลังโรงเก็บโลหะบังสัญญาณ',
+      building: 'หลังอาคาร/สิ่งปลูกสร้างบังสัญญาณ',
+      emi_5g: 'คลื่นรบกวนใกล้เสา 5G / สถานีไฟ',
+      emi_radar: 'คลื่นรบกวนใกล้เรดาร์หอบังคับการ',
+      terrain: 'เนินเขาบังแนวสายตา (NLOS)',
+      range: 'ไกลเกินระยะคลื่นรีโมต',
+      clear: 'กำลังฟื้นสัญญาณ'
+    };
+    const sigShortLabels = {
+      sensor_lost: 'ขาดสัญญาณ',
+      tree: 'อับ·ต้นไม้',
+      hangar: 'อับ·โรงเก็บ',
+      building: 'อับ·อาคาร',
+      emi_5g: 'รบกวน·5G',
+      emi_radar: 'รบกวน·เรดาร์',
+      terrain: 'อับ·เนินเขา',
+      range: 'คลื่นไกล',
+      clear: ''
+    };
+    const sigReasonLong = sigSourceLabels[sigSource] || 'สัญญาณอับ';
+    const sigReasonShort = sigShortLabels[sigSource] || '';
+
+    const objCard = document.getElementById('hud-objective-card');
+    if (objCard) {
+      const isCritCard = sigState === 'critical' || windLevel === 'storm';
+      const isWarnCard = !isCritCard && (sigState === 'weak' || windLevel === 'strong');
+      objCard.classList.toggle('signal-warn', isWarnCard);
+      objCard.classList.toggle('signal-critical', isCritCard);
+    }
+
+    const sigPill = document.getElementById('hud-signal-pill');
+    const sigText = document.getElementById('hud-signal-text');
+    const sigBars = document.getElementById('hud-signal-bars');
+    if (sigPill && sigText) {
+      sigPill.className = `hud-signal-pill ${sigState}`;
+      if (sigState === 'critical') {
+        sigText.innerText = `จุดอับ! ${sigReasonShort ? sigReasonShort + ' ' : ''}${rssiVal}%`;
+      } else if (sigState === 'weak') {
+        sigText.innerText = `${sigReasonShort || 'สัญญาณอ่อน'} ${rssiVal}%`;
+      } else {
+        sigText.innerText = `RX ${rssiVal}%`;
+      }
+      if (sigBars) {
+        const activeBars = rssiVal >= 75 ? 4 : rssiVal >= 50 ? 3 : rssiVal >= 25 ? 2 : 1;
+        const bars = sigBars.children;
+        for (let i = 0; i < bars.length; i++) {
+          bars[i].classList.toggle('active', i < activeBars);
+        }
+      }
     }
 
     // Update live Drone LED status indicator & Start/Stop + 12-subsystem alerts!
@@ -2229,10 +3397,36 @@ class DroneApp {
         ledText.innerText = '🟠 VRS — ลมวนใต้ใบพัด! เอียงบินออกด้านข้าง (W/Q/E)';
       } else if (telemetry.isArmed && telemetry.lidarBraking) {
         ledDot.className = 'led-dot ready';
-        ledText.innerText = '🔵 LIDAR — ตรวจพบสิ่งกีดขวาง กำลังเบรกกันชนอัตโนมัติ!';
-      } else if (telemetry.isArmed && typeof telemetry.rssiPercent === 'number' && telemetry.rssiPercent <= 30) {
+        const lDistStr = typeof telemetry.lidarNearestDist === 'number' ? ` ${telemetry.lidarNearestDist.toFixed(1)} ม.` : '';
+        const lObjStr = telemetry.lidarNearestTag ? `${telemetry.lidarNearestTag}${lDistStr}${telemetry.lidarNearestDirTh ? ' (' + telemetry.lidarNearestDirTh + ')' : ''}` : 'สิ่งกีดขวาง';
+        ledText.innerText = `🔵 LIDAR/RADAR — ตรวจพบ${lObjStr} กำลังเบรกกันชนอัตโนมัติ!`;
+      } else if (telemetry.isArmed && telemetry.isRTHMode && (telemetry.isFailsafeReturn || telemetry.sensorLostSim)) {
         ledDot.className = 'led-dot danger';
-        ledText.innerText = `🟠 RX LOW (${telemetry.rssiPercent}%) — สัญญาณรีโมตอ่อน บินกลับมาใกล้ฐาน!`;
+        const algoTxt = telemetry.rthAlgoLabel ? ` (${telemetry.rthAlgoLabel})` : '';
+        ledText.innerText = telemetry.rthPhase === 'DESCEND'
+          ? '🔵 AUTO-RETURN — ถึงจุดเริ่มต้น H แล้ว กำลังลงจอดและดับมอเตอร์อัตโนมัติ!'
+          : `🔴 สัญญาณ/เซนเซอร์หาย — คำนวณเส้นทางกลับจุดเริ่มต้น${algoTxt} · เหลือ ${telemetry.distFromHomeM || 0} ม. (กด P กู้สัญญาณ)`;
+      } else if (telemetry.isArmed && sigState === 'critical') {
+        ledDot.className = 'led-dot danger';
+        const cdNote = telemetry.signalLossCountdown > 0
+          ? ` — คำนวณเส้นทางกลับอัตโนมัติใน ${telemetry.signalLossCountdown} วิ!`
+          : ' — รีบบินออกสู่ที่โล่ง!';
+        ledText.innerText = `🔴 จุดอับสัญญาณ! (${sigReasonLong} · RX ${rssiVal}%)${cdNote}`;
+      } else if (telemetry.isArmed && windLevel === 'storm') {
+        ledDot.className = 'led-dot danger';
+        ledText.innerText = `🔴 พายุลมกระโชก! (${windSpd.toFixed(1)} ม./วิ ทิศ${windDirName}) — โดรนเอียงสู้ลมหนัก/เปลืองแบต!`;
+      } else if (telemetry.isArmed && telemetry.isSprayDrift) {
+        ledDot.className = 'led-dot warning';
+        ledText.innerText = `🟠 SPRAY DRIFT! ลม ${windSpd.toFixed(1)} ม./วิ พัดละอองปุ๋ยปลิวออกนอกแปลง — ตามกฎเกษตรควรงดพ่น`;
+      } else if (telemetry.isArmed && sigState === 'weak') {
+        ledDot.className = 'led-dot warning';
+        ledText.innerText = `🟠 สัญญาณอับ (${sigReasonLong} · RX ${rssiVal}%) — ระวังสัญญาณอ่อน/GPS คลาดเคลื่อน`;
+      } else if (telemetry.isArmed && windLevel === 'strong') {
+        ledDot.className = 'led-dot warning';
+        ledText.innerText = `🟠 ลมแรง (${windSpd.toFixed(1)} ม./วิ ทิศ${windDirName}) — โดรนเอียงต้านลม (กด H สลับ ATTI เพื่อดูแรงลมพัด)`;
+      } else if (telemetry.isArmed && telemetry.hitAltitudeLimit) {
+        ledDot.className = 'led-dot warning';
+        ledText.innerText = `🛑 MAX ALT (${altLimitM} ม.) — ถึงเพดานบินสูงสุดของ${telemetry.frameClassLabel || 'โดรนรุ่นนี้'}แล้ว!`;
       } else if (telemetry.isArmed && pState === 'AUTO_TAKEOFF') {
         ledDot.className = 'led-dot ready';
         ledText.innerText = '🔵 AUTO-TAKEOFF — กำลังบินขึ้นอัตโนมัติสู่ความสูง 3.0 ม.';
@@ -2241,7 +3435,8 @@ class DroneApp {
         ledText.innerText = '🔵 AUTO-LAND — กำลังลดระดับลงจอดและดับมอเตอร์อัตโนมัติ (กด L ยกเลิก)';
       } else if (telemetry.isArmed && telemetry.isRTHMode) {
         ledDot.className = 'led-dot ready';
-        ledText.innerText = `🔵 ${telemetry.flightModeLabel} — กำลังบินกลับลานจอด H (กด R ยกเลิก)`;
+        const algoTag = telemetry.rthAlgoLabel ? ` · ${telemetry.rthAlgoLabel}` : '';
+        ledText.innerText = `🔵 ${telemetry.flightModeLabel}${algoTag} — เหลือ ${telemetry.distFromHomeM || 0} ม. สู่จุดเริ่มต้น H (กด R ยกเลิก)`;
       } else if (telemetry.isArmed && pState === 'ARMED_IDLE') {
         ledDot.className = 'led-dot ready';
         const holdNote = (telemetry.touchdownHoldPct || 0) > 10
@@ -2252,13 +3447,14 @@ class DroneApp {
         ledDot.className = 'led-dot ready';
         const igeTag = (!telemetry.isLanded && telemetry.igeFactor > 1.04) ? ' · IGE' : '';
         const modeTxt = telemetry.flightModeLabel || 'ARMED';
-        ledText.innerText = `🟢 ${modeTxt} · RX ${telemetry.rssiPercent ?? 100}% · ลม ${telemetry.liveWindSpeed || 0} ม./วิ${igeTag}${payloadTag}`;
+        ledText.innerText = `🟢 ${modeTxt} · RX ${rssiVal}% · ลม ${telemetry.liveWindSpeed || 0} ม./วิ${igeTag}${payloadTag}`;
       } else {
-        ledDot.className = 'led-dot standby';
+        ledDot.className = sigState === 'critical' ? 'led-dot danger' : sigState === 'weak' ? 'led-dot warning' : 'led-dot standby';
         const readyMode = telemetry.hasGps
           ? (telemetry.flightModeLabel === 'RTK HOLD' ? 'RTK GPS พร้อม' : 'GPS พร้อม')
           : (telemetry.hasBaro ? 'BARO พร้อม (ไม่มี GPS)' : 'MANUAL F4 (ไม่มี Baro/GPS)');
-        ledText.innerText = `🟡 STANDBY — ${readyMode}${payloadTag} · กด B สตาร์ท หรือ T บินขึ้น`;
+        const sigNote = sigState !== 'good' ? ` · ⚠️ ${sigReasonLong} (RX ${rssiVal}%)` : '';
+        ledText.innerText = `🟡 STANDBY — ${readyMode}${sigNote}${payloadTag} · กด B สตาร์ท หรือ T บินขึ้น`;
       }
     }
 

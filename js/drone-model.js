@@ -508,6 +508,7 @@ class DroneModelBuilder {
       propDiscFronts: [],
       propDiscRears: [],
       frontLed: frontNavLedMat,
+      rearLed: rearNavLedMat,
       carbonTex: tex.carbonTex || null
     };
 
@@ -518,7 +519,7 @@ class DroneModelBuilder {
       const frameGroup = new THREE_LIB.Group();
       frameGroup.name = 'frame';
 
-      // Sculpted Tapered Hex-Aerodynamic Bottom & Top Carbon Plates
+      // Sculpted Tapered Hex-Aerodynamic Bottom & Top Carbon Plates + Real-Life Contoured Upper Canopy Shell!
       const bPlate = new THREE_LIB.Mesh(
         DroneModelBuilder.createChamferedPlateGeo(bodyW, bodyD, 0.026, 0.08, THREE_LIB),
         carbonPlateMat
@@ -529,74 +530,109 @@ class DroneModelBuilder {
 
       // Lower Recessed Carbon Belly Skid Core (adds realistic 3D fuselage depth!)
       const bellyPan = new THREE_LIB.Mesh(
-        DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.76, bodyD * 0.78, 0.018, 0.06, THREE_LIB),
+        DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.78, bodyD * 0.80, 0.020, 0.06, THREE_LIB),
         carbonEdgeMat
       );
       bellyPan.position.set(0, -0.020, -0.01);
       frameGroup.add(bellyPan);
 
       const tPlate = new THREE_LIB.Mesh(
-        DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.86, bodyD * 0.86, 0.020, 0.07, THREE_LIB),
+        DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.90, bodyD * 0.90, 0.022, 0.07, THREE_LIB),
         carbonPlateMat
       );
-      tPlate.position.set(0, 0.148, -0.015);
+      tPlate.position.set(0, 0.146, -0.012);
       tPlate.castShadow = true;
       frameGroup.add(tPlate);
 
-      // Molded Aerodynamic Nose Cowling + Twin Forward Stereo Obstacle-Vision Sensor Eyes (DJI/Industrial Look!)
+      // Real-Life Molded Aerodynamic Unibody Fuselage Shell (DJI Mavic / Matrice / Agras / Carbon Race Canopy!)
       if (wb > 260) {
-        const cowlLen = bodyD * 0.34;
-        const noseCowl = new THREE_LIB.Mesh(
-          DroneModelBuilder.createAeroNoseCowlGeo(bodyW * 0.80, 0.078, cowlLen, THREE_LIB),
+        // Contoured mid-body sculpted aerodynamic shell wrapping seamlessly over the electronics deck
+        const midCarapace = new THREE_LIB.Mesh(
+          DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.94, bodyD * 0.86, 0.072, 0.09, THREE_LIB),
           carbonEdgeMat
         );
-        noseCowl.position.set(0, 0.048, bodyD * 0.16);
+        midCarapace.position.set(0, 0.084, -0.01);
+        midCarapace.castShadow = true;
+        frameGroup.add(midCarapace);
+
+        // Sculpted crowned dorsal aero ridge (gives smooth real-drone curved unibody silhouette!)
+        const dorsalCrown = new THREE_LIB.Mesh(
+          DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.74, bodyD * 0.78, 0.032, 0.08, THREE_LIB),
+          carbonPlateMat
+        );
+        dorsalCrown.position.set(0, 0.166, -0.005);
+        dorsalCrown.castShadow = true;
+        frameGroup.add(dorsalCrown);
+
+        // Molded Aerodynamic Tapered Nose Cowling + Recessed Dark Stereo Obstacle-Vision Visor!
+        const cowlLen = bodyD * 0.38;
+        const noseCowl = new THREE_LIB.Mesh(
+          DroneModelBuilder.createAeroNoseCowlGeo(bodyW * 0.84, 0.086, cowlLen, THREE_LIB),
+          carbonPlateMat
+        );
+        noseCowl.position.set(0, 0.052, bodyD * 0.16);
         noseCowl.castShadow = true;
         frameGroup.add(noseCowl);
 
+        // Glossy Dark Visor Faceplate across Forward Nose (Mavic 3 / Matrice 350 look!)
+        const visorPlate = new THREE_LIB.Mesh(
+          new THREE_LIB.BoxGeometry(bodyW * 0.56, 0.052, 0.022),
+          motorBellMat
+        );
+        visorPlate.position.set(0, 0.092, bodyD * 0.455);
+        frameGroup.add(visorPlate);
+
         // Sleek Anodized Dorsal Hood Accent Trim on Nose Cowl
         const hoodRidge = new THREE_LIB.Mesh(
-          new THREE_LIB.BoxGeometry(bodyW * 0.24, 0.014, cowlLen * 0.65),
+          new THREE_LIB.BoxGeometry(bodyW * 0.20, 0.012, cowlLen * 0.68),
           orangeAluminumMat
         );
-        hoodRidge.position.set(0, 0.132, bodyD * 0.16 + cowlLen * 0.38);
+        hoodRidge.position.set(0, 0.146, bodyD * 0.16 + cowlLen * 0.36);
         hoodRidge.rotation.x = 0.12;
         frameGroup.add(hoodRidge);
 
         // Twin Forward Binocular Stereo Vision Lenses (recessed dark bezels + coated sapphire optics!)
-        const eyeSpread = bodyW * 0.17;
-        const eyeZ = bodyD * 0.455;
-        const opticGlassMat = new THREE_LIB.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.06, metalness: 0.94 });
+        const eyeSpread = bodyW * 0.18;
+        const eyeZ = bodyD * 0.468;
+        const opticGlassMat = new THREE_LIB.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.05, metalness: 0.95 });
         [-eyeSpread, eyeSpread].forEach(ex => {
           const bezel = new THREE_LIB.Mesh(
-            new THREE_LIB.CylinderGeometry(0.022, 0.024, 0.022, 14),
-            motorBellMat
+            new THREE_LIB.CylinderGeometry(0.022, 0.024, 0.020, 14),
+            silverShaftMat
           );
           bezel.rotation.x = Math.PI / 2;
-          bezel.position.set(ex, 0.088, eyeZ);
+          bezel.position.set(ex, 0.092, eyeZ);
           frameGroup.add(bezel);
 
           const lens = new THREE_LIB.Mesh(
             new THREE_LIB.SphereGeometry(0.016, 12, 10),
             opticGlassMat
           );
-          lens.position.set(ex, 0.088, eyeZ + 0.008);
+          lens.position.set(ex, 0.092, eyeZ + 0.008);
           frameGroup.add(lens);
         });
 
         // High-Luminance Forward Work/Nav LED Bar on Heavy Survey 650 & Agri 800
         if (wb >= 600) {
           const headLight = new THREE_LIB.Mesh(
-            new THREE_LIB.BoxGeometry(bodyW * 0.28, 0.014, 0.012),
+            new THREE_LIB.BoxGeometry(bodyW * 0.32, 0.015, 0.012),
             frontNavLedMat
           );
-          headLight.position.set(0, 0.058, bodyD * 0.495);
+          headLight.position.set(0, 0.058, bodyD * 0.50);
           frameGroup.add(headLight);
         }
       } else {
-        // Aggressive Beveled Carbon Race Bumper on 250mm FPV Frame
+        // Sleek Low-Profile Aerodynamic Racing Canopy Hood + Beveled Carbon Bumper on 250mm FPV Frame
+        const fpvCanopy = new THREE_LIB.Mesh(
+          DroneModelBuilder.createAeroNoseCowlGeo(bodyW * 0.78, 0.052, bodyD * 0.52, THREE_LIB),
+          carbonEdgeMat
+        );
+        fpvCanopy.position.set(0, 0.118, -bodyD * 0.12);
+        fpvCanopy.castShadow = true;
+        frameGroup.add(fpvCanopy);
+
         const noseTrim = new THREE_LIB.Mesh(
-          new THREE_LIB.BoxGeometry(bodyW * 0.48, 0.022, 0.032),
+          new THREE_LIB.BoxGeometry(bodyW * 0.50, 0.022, 0.032),
           orangeAluminumMat
         );
         noseTrim.position.set(0, 0.008, bodyD * 0.495);
@@ -693,39 +729,36 @@ class DroneModelBuilder {
             frameGroup.add(brace);
           }
         } else {
-          // Sculpted Tapered 3K Carbon Aerospace Arm (wider reinforced root -> sleek slender motor pod!)
+          // Sculpted Tapered Aero-Enclosed Folding-Style Arm (DJI Mavic / Modern Carbon Arm Look!)
           const arm = new THREE_LIB.Mesh(flatArmGeo, carbonPlateMat);
-          arm.position.set(0, 0.002, 0);
+          arm.position.set(0, 0.004, 0);
           arm.rotation.y = angle;
           arm.castShadow = true;
           frameGroup.add(arm);
 
-          // CNC Anodized Top Structural Rib + Root Gusset Collar
-          const rail = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.020, 0.008, armDist * 0.62), orangeAluminumMat);
-          rail.position.set(armDist * 0.52 * sinA, 0.020, armDist * 0.52 * cosA);
+          // Molded Aerodynamic Lower Shell Fairing enclosing wires cleanly (replaces exposed loose cables & zip ties!)
+          const armBelly = new THREE_LIB.Mesh(
+            DroneModelBuilder.createTaperedArmGeo(flatRootW * 0.86, flatTipW * 0.84, armDist * 0.94, 0.022, THREE_LIB),
+            carbonEdgeMat
+          );
+          armBelly.position.set(0, -0.016, 0);
+          armBelly.rotation.y = angle;
+          frameGroup.add(armBelly);
+
+          // Sleek Molded Root Shoulder Hinge Joint where arm meets fuselage (DJI Mavic folding shoulder detail!)
+          const hingeDist = bodyW * 0.48;
+          const shoulder = new THREE_LIB.Mesh(
+            new THREE_LIB.CylinderGeometry(0.032, 0.036, 0.054, 14),
+            carbonEdgeMat
+          );
+          shoulder.position.set(hingeDist * sinA, 0.012, hingeDist * cosA);
+          frameGroup.add(shoulder);
+
+          // CNC Anodized Top Structural Accent Line along arm spine
+          const rail = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.016, 0.007, armDist * 0.62), orangeAluminumMat);
+          rail.position.set(armDist * 0.54 * sinA, 0.021, armDist * 0.54 * cosA);
           rail.rotation.y = angle;
           frameGroup.add(rail);
-
-          // Braided 3-Phase Motor Wire Conduit tucked cleanly beneath arm + Dual Wire Clips
-          const wireLoom = new THREE_LIB.Mesh(
-            new THREE_LIB.CylinderGeometry(0.011, 0.011, armDist * 0.70, 8),
-            darkRubberMat
-          );
-          wireLoom.position.set(armDist * 0.48 * sinA, -0.020, armDist * 0.48 * cosA);
-          wireLoom.rotation.order = 'YXZ';
-          wireLoom.rotation.y = angle;
-          wireLoom.rotation.x = Math.PI / 2;
-          frameGroup.add(wireLoom);
-
-          [0.42, 0.70].forEach(frac => {
-            const tie = new THREE_LIB.Mesh(
-              new THREE_LIB.BoxGeometry(flatTipW + 0.012, 0.042, 0.018),
-              darkRubberMat
-            );
-            tie.position.set(armDist * frac * sinA, -0.003, armDist * frac * cosA);
-            tie.rotation.y = angle;
-            frameGroup.add(tie);
-          });
         }
 
         // Reinforced Tapered Motor Mount Pod + CNC Trim Ring + 4 Visible Stainless M3 Bolts!
@@ -1074,16 +1107,15 @@ class DroneModelBuilder {
       const isSmart = Boolean(bat.smartPack);
       const labelTex = DroneModelBuilder.makeBatteryLabelTexture(bat, THREE_LIB);
 
-      // Clamp footprint strictly inside safe central deck so heavy packs grow TALLER rather than protruding into spinning props!
-      const rawBatW = isSmart ? 0.38 : bat.cells >= 6 ? 0.34 : bat.cells === 3 ? 0.22 : 0.28;
-      const rawBatH = isSmart ? 0.21 : bat.cells >= 6 ? 0.18 : bat.cells === 3 ? 0.12 : 0.15;
-      const rawBatD = isSmart ? 0.50 : bat.cells >= 6 ? 0.44 : bat.cells === 3 ? 0.30 : 0.38;
-      const batW = Math.min(rawBatW, bodyW * 0.80);
-      const batD = Math.min(rawBatD, bodyD * 0.72);
-      const volBoost = (rawBatW * rawBatD) / Math.max(0.02, batW * batD);
-      const batH = Math.min(0.29, rawBatH * Math.pow(volBoost, 0.42));
-      const batZ = -0.02;
-      const batY = 0.170 + batH * 0.5;
+      // Sleek Real-Life Recessed Smart/LiPo Battery Envelope (fits cleanly in mid-fuselage bay — leaves nose crown clear for LiDAR & rear crown clear for flush GPS/RTK!)
+      const rawBatW = isSmart ? 0.34 : bat.cells >= 6 ? 0.30 : bat.cells === 3 ? 0.20 : 0.25;
+      const rawBatH = isSmart ? 0.118 : bat.cells >= 6 ? 0.104 : bat.cells === 3 ? 0.074 : 0.088;
+      const rawBatD = isSmart ? 0.34 : bat.cells >= 6 ? 0.29 : bat.cells === 3 ? 0.19 : 0.24;
+      const batW = Math.min(rawBatW, bodyW * 0.72);
+      const batD = Math.min(rawBatD, bodyD * 0.48);
+      const batH = rawBatH;
+      const batZ = 0.0;
+      const batY = 0.156 + batH * 0.44;
 
       if (isLiion) {
         // 4 Visible Cylindrical 21700 Cells in Translucent Blue Shrink Wrap!
@@ -1504,20 +1536,31 @@ class DroneModelBuilder {
         fpvLens.position.set(0, 0.098, noseZ + 0.074 * fpvScale);
         camGroup.add(fpvLens);
 
-        // Rear Crimson 5.8GHz VTX Lollipop Cloverleaf Antenna (strictly inside central safe corridor!)
-        const vtxX = -bodyW * 0.18;
-        const vtxZ = -bodyD * 0.42;
-        const vtxStem = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.008, 0.008, 0.20, 8), wireBlackMat);
-        vtxStem.rotation.x = -0.28;
-        vtxStem.position.set(vtxX, 0.23, vtxZ - 0.03);
-        camGroup.add(vtxStem);
-
-        const vtxBulb = new THREE_LIB.Mesh(
-          new THREE_LIB.SphereGeometry(0.038, 14, 12),
-          new THREE_LIB.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.28, metalness: 0.15 })
+      // Sleek Flush Rear Digital VTX Aluminum Heatsink Module (DJI O3 Air Unit Style — ZERO sticking-out lollipop pole!)
+        const vtxBay = new THREE_LIB.Mesh(
+          new THREE_LIB.BoxGeometry(Math.min(0.11, bodyW * 0.34), 0.036, 0.072),
+          motorBellMat
         );
-        vtxBulb.position.set(vtxX, 0.32, vtxZ - 0.06);
-        camGroup.add(vtxBulb);
+        vtxBay.position.set(0, 0.132, -bodyD * 0.36);
+        camGroup.add(vtxBay);
+
+        for (let f = -2; f <= 2; f++) {
+          const fin = new THREE_LIB.Mesh(
+            new THREE_LIB.BoxGeometry(0.008, 0.010, 0.068),
+            silverShaftMat
+          );
+          fin.position.set(f * 0.016, 0.152, -bodyD * 0.36);
+          camGroup.add(fin);
+        }
+
+        // Recessed flush micro-patch RF port cap (stays cleanly inside rear tail contour!)
+        const vtxPatch = new THREE_LIB.Mesh(
+          new THREE_LIB.CylinderGeometry(0.014, 0.016, 0.018, 12),
+          orangeAluminumMat
+        );
+        vtxPatch.rotation.x = Math.PI / 2;
+        vtxPatch.position.set(0, 0.132, -bodyD * 0.405);
+        camGroup.add(vtxPatch);
 
         this.hasGimbal = false;
       } else {
@@ -1667,260 +1710,296 @@ class DroneModelBuilder {
     }
 
     // ========================================================
-    // 08. GPS / RTK (Foldable Aluminum Mast + M8N Puck / Dual-Freq RTK Survey Dome)
+    // 08. GPS / RTK (Modern Flush Aerodynamic Dorsal GNSS Canopy Dome / Dual Low-Profile RTK Pods — ZERO Poles!)
     // ========================================================
     if (p.gps && p.gps.hasGps) {
       const gpsGroup = new THREE_LIB.Group();
       gpsGroup.name = 'gps';
       const isRtk = Boolean(p.gps.isRtk);
 
-      const mastGroup = new THREE_LIB.Group();
-      mastGroup.position.set(bodyW * 0.20, 0.160, -bodyD * 0.34);
-      mastGroup.rotation.x = isRtk ? -0.08 : -0.14;
-
-      // Knurled Aluminum Folding Pedestal Base
-      const ped = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.028, 0.034, 0.042, 14), orangeAluminumMat);
-      ped.position.y = 0.021;
-      mastGroup.add(ped);
-
-      const rodH = isRtk ? 0.40 : 0.34;
-      const rod = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.013, 0.013, rodH, 10), carbonPlateMat);
-      rod.position.y = 0.04 + rodH * 0.5;
-      mastGroup.add(rod);
-
       if (isRtk) {
-        // Industrial Survey RTK Mushroom Dome Antenna
-        const rtkR = Math.min(0.105, bodyW * 0.28);
-        const rtkCollar = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(rtkR, rtkR * 0.84, 0.036, 24),
-          orangeAluminumMat
-        );
-        rtkCollar.position.y = 0.04 + rodH;
-        mastGroup.add(rtkCollar);
+        // Real-World DJI Matrice 350 / Agras T40 Style: Twin Sleek Low-Profile Contoured RTK Shoulder Pods (ZERO sticking poles!)
+        const podSpread = Math.min(bodyW * 0.34, 0.145);
+        const podZ = -bodyD * 0.34;
+        const podBaseY = 0.182;
+        const podR = Math.min(0.056, bodyW * 0.145);
 
-        const rtkDome = new THREE_LIB.Mesh(
-          new THREE_LIB.SphereGeometry(rtkR, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
-          whiteNylonMat
-        );
-        rtkDome.position.y = 0.052 + rodH;
-        rtkDome.castShadow = true;
-        mastGroup.add(rtkDome);
+        [-podSpread, podSpread].forEach((px, idx) => {
+          const podGrp = new THREE_LIB.Group();
+          podGrp.position.set(px, podBaseY, podZ);
 
-        const rtkLed = new THREE_LIB.Mesh(
-          new THREE_LIB.SphereGeometry(0.015, 8, 8),
-          new THREE_LIB.MeshBasicMaterial({ color: 0x22c55e })
-        );
-        rtkLed.position.set(0, 0.04 + rodH, -rtkR * 0.96);
-        mastGroup.add(rtkLed);
-        this.leds.push(rtkLed);
+          // Low sculpted carbon shoulder fairing base
+          const cradle = new THREE_LIB.Mesh(
+            new THREE_LIB.CylinderGeometry(podR * 0.94, podR * 1.10, 0.024, 20),
+            carbonEdgeMat
+          );
+          cradle.position.y = 0.012;
+          podGrp.add(cradle);
+
+          // Anodized precision trim ring
+          const rtkRing = new THREE_LIB.Mesh(
+            new THREE_LIB.TorusGeometry(podR * 0.90, 0.006, 8, 22),
+            orangeAluminumMat
+          );
+          rtkRing.rotation.x = Math.PI / 2;
+          rtkRing.position.y = 0.025;
+          podGrp.add(rtkRing);
+
+          // Low aerodynamic matte-white ceramic RTK dome (height ~0.032m — flush & ultra-clean!)
+          const rtkDome = new THREE_LIB.Mesh(
+            new THREE_LIB.SphereGeometry(podR * 0.92, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+            whiteNylonMat
+          );
+          rtkDome.scale.set(1.0, 0.55, 1.0);
+          rtkDome.position.y = 0.024;
+          rtkDome.castShadow = true;
+          podGrp.add(rtkDome);
+
+          // Tiny green RTK-Fix status LED integrated cleanly on rear lip
+          if (idx === 1) {
+            const rtkLed = new THREE_LIB.Mesh(
+              new THREE_LIB.SphereGeometry(0.011, 8, 8),
+              new THREE_LIB.MeshBasicMaterial({ color: 0x22c55e })
+            );
+            rtkLed.position.set(0, 0.018, -podR * 0.96);
+            podGrp.add(rtkLed);
+            this.leds.push(rtkLed);
+          }
+
+          gpsGroup.add(podGrp);
+        });
       } else {
-        // M8N Ceramic Patch GPS Puck with Compass Ring
-        const puckR = Math.min(0.084, bodyW * 0.24);
-        const puck = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(puckR, puckR, 0.034, 22),
+        // Real-World DJI Mavic / Air Style: Flush Integrated Aerodynamic Teardrop GNSS Canopy Dome (ZERO mast pole!)
+        const domeZ = -bodyD * 0.34;
+        const domeY = 0.182;
+        const domeR = Math.min(0.058, bodyW * 0.18);
+
+        const bezel = new THREE_LIB.Mesh(
+          new THREE_LIB.CylinderGeometry(domeR * 0.98, domeR * 1.12, 0.018, 22),
+          carbonEdgeMat
+        );
+        bezel.scale.set(1.0, 1.0, 1.28);
+        bezel.position.set(0, domeY + 0.009, domeZ);
+        gpsGroup.add(bezel);
+
+        const domeCap = new THREE_LIB.Mesh(
+          new THREE_LIB.SphereGeometry(domeR, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+          carbonPlateMat
+        );
+        domeCap.scale.set(1.0, 0.42, 1.28);
+        domeCap.position.set(0, domeY + 0.016, domeZ);
+        domeCap.castShadow = true;
+        gpsGroup.add(domeCap);
+
+        // Flush ceramic GNSS window inlay + thin orange precision accent line
+        const patchTop = new THREE_LIB.Mesh(
+          new THREE_LIB.CylinderGeometry(domeR * 0.56, domeR * 0.62, 0.008, 18),
           whiteNylonMat
         );
-        puck.position.y = 0.04 + rodH;
-        puck.castShadow = true;
-        mastGroup.add(puck);
+        patchTop.scale.set(1.0, 1.0, 1.22);
+        patchTop.position.set(0, domeY + 0.041, domeZ);
+        gpsGroup.add(patchTop);
 
-        const oRing = new THREE_LIB.Mesh(
-          new THREE_LIB.RingGeometry(puckR * 0.55, puckR * 0.78, 22),
+        const accentRing = new THREE_LIB.Mesh(
+          new THREE_LIB.RingGeometry(domeR * 0.64, domeR * 0.78, 22),
           new THREE_LIB.MeshBasicMaterial({ color: 0xff6a00, side: THREE_LIB.DoubleSide })
         );
-        oRing.rotation.x = -Math.PI / 2;
-        oRing.position.y = 0.058 + rodH;
-        mastGroup.add(oRing);
+        accentRing.rotation.x = -Math.PI / 2;
+        accentRing.scale.set(1.0, 1.22, 1.0);
+        accentRing.position.set(0, domeY + 0.043, domeZ);
+        gpsGroup.add(accentRing);
+
+        const gpsLed = new THREE_LIB.Mesh(
+          new THREE_LIB.SphereGeometry(0.010, 8, 8),
+          new THREE_LIB.MeshBasicMaterial({ color: 0x22c55e })
+        );
+        gpsLed.position.set(0, domeY + 0.014, domeZ - domeR * 1.24);
+        gpsGroup.add(gpsLed);
+        this.leds.push(gpsLed);
       }
 
-      gpsGroup.add(mastGroup);
       this.parts.gps = {
         group: gpsGroup,
         basePos: new THREE_LIB.Vector3(0, 0, 0),
-        explodeOffset: new THREE_LIB.Vector3(0.24, 0.52, -0.35)
+        explodeOffset: new THREE_LIB.Vector3(0, 0.46, -0.24)
       };
       this.droneGroup.add(gpsGroup);
     }
 
     // ========================================================
-    // 09. ตัวรับสัญญาณรีโมต RX (2.4GHz V-Dipole / ELRS Immortal-T / Dual-Band Diversity)
+    // 09. ตัวรับสัญญาณรีโมต RX (Sleek Internal / Flush Integrated RF Modules — ZERO Whiskers, T-Pipes, or Rod Antennas!)
     // ========================================================
     if (p.rx) {
       const rxGroup = new THREE_LIB.Group();
       rxGroup.name = 'rx';
       const rxType = p.rx.rxType || 'elrs';
-      const tailZ = -bodyD * 0.48;
+      const tailZ = -bodyD * 0.42;
 
-      // Shielded Mini Receiver Board tucked neatly inside rear chassis
-      const rxBoard = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(Math.min(0.10, bodyW * 0.30), 0.024, 0.075), pcbMat);
-      rxBoard.position.set(-bodyW * 0.18, 0.128, tailZ + 0.08);
+      // Shielded Internal Mini RF Receiver Board tucked neatly inside rear chassis bay
+      const rxBoard = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(Math.min(0.11, bodyW * 0.30), 0.022, 0.075), pcbMat);
+      rxBoard.position.set(0, 0.126, tailZ + 0.05);
       rxGroup.add(rxBoard);
 
-      const rxShield = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(Math.min(0.058, bodyW * 0.18), 0.014, 0.048), silverShaftMat);
-      rxShield.position.set(-bodyW * 0.18, 0.144, tailZ + 0.08);
+      const rxShield = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(Math.min(0.068, bodyW * 0.20), 0.014, 0.048), silverShaftMat);
+      rxShield.position.set(0, 0.140, tailZ + 0.05);
       rxGroup.add(rxShield);
 
       const rxLed = new THREE_LIB.Mesh(
-        new THREE_LIB.SphereGeometry(0.010, 8, 8),
+        new THREE_LIB.SphereGeometry(0.009, 8, 8),
         new THREE_LIB.MeshBasicMaterial({ color: 0x38bdf8 })
       );
-      rxLed.position.set(-bodyW * 0.24, 0.144, tailZ + 0.06);
+      rxLed.position.set(-bodyW * 0.14, 0.144, tailZ + 0.01);
       rxGroup.add(rxLed);
 
       if (rxType === '24g') {
-        // Dual V-Angled 2.4GHz Whisker Dipoles scaled cleanly inside rear corridor (zero prop interference!)
-        const wLen = Math.min(0.18, bodyW * 0.56);
-        const wBaseX = bodyW * 0.22;
-        [-1, 1].forEach(side => {
-          const whisker = new THREE_LIB.Mesh(
-            new THREE_LIB.CylinderGeometry(0.006, 0.006, wLen, 8),
-            darkRubberMat
-          );
-          whisker.position.set(side * wBaseX, 0.145, tailZ - 0.035);
-          whisker.rotation.z = side * -0.52;
-          whisker.rotation.x = -0.22;
-          rxGroup.add(whisker);
-
-          const tip = new THREE_LIB.Mesh(
-            new THREE_LIB.CylinderGeometry(0.009, 0.009, 0.055, 8),
-            yellowConnectorMat
-          );
-          tip.position.set(side * (wBaseX + wLen * 0.26), 0.145 + wLen * 0.44, tailZ - 0.055);
-          tip.rotation.z = side * -0.52;
-          tip.rotation.x = -0.22;
-          rxGroup.add(tip);
-        });
-      } else {
-        // Iconic 915MHz Immortal-T Horizontal Dipole across Rear Tail (scaled to stay 100% clear of rear rotors!)
-        const tSpan = Math.min(0.34, bodyW * 0.88);
-        const stem = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(0.010, 0.010, 0.10, 8),
-          darkRubberMat
+        // Flush Rear Internal 2.4GHz Ceramic Patch Cover (clean contoured rear bay — zero rabbit-ear sticks!)
+        const rfPlate = new THREE_LIB.Mesh(
+          DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.38, 0.075, 0.014, 0.02, THREE_LIB),
+          motorBellMat
         );
-        stem.rotation.x = Math.PI / 2;
-        stem.position.set(0, 0.072, tailZ - 0.04);
-        rxGroup.add(stem);
+        rfPlate.position.set(0, 0.172, tailZ + 0.03);
+        rxGroup.add(rfPlate);
 
-        const tBar = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(0.011, 0.011, tSpan, 10),
-          darkRubberMat
+        const rfStripe = new THREE_LIB.Mesh(
+          new THREE_LIB.BoxGeometry(bodyW * 0.26, 0.005, 0.010),
+          new THREE_LIB.MeshBasicMaterial({ color: 0x38bdf8 })
         );
-        tBar.rotation.z = Math.PI / 2;
-        tBar.position.set(0, 0.072, tailZ - 0.085);
-        rxGroup.add(tBar);
+        rfStripe.position.set(0, 0.181, tailZ + 0.02);
+        rxGroup.add(rfStripe);
+      } else if (rxType === 'elrs') {
+        // Sleek Low-Profile Aerodynamic Flush Micro-Fin RF Pod (only 2.6cm high, hugs rear tail smoothly — zero sticks!)
+        const finBase = new THREE_LIB.Mesh(
+          DroneModelBuilder.createChamferedPlateGeo(bodyW * 0.34, 0.095, 0.016, 0.02, THREE_LIB),
+          motorBellMat
+        );
+        finBase.position.set(0, 0.172, tailZ + 0.04);
+        rxGroup.add(finBase);
 
-        const tCenter = new THREE_LIB.Mesh(
-          new THREE_LIB.BoxGeometry(0.048, 0.028, 0.032),
+        const microFin = new THREE_LIB.Mesh(
+          new THREE_LIB.BoxGeometry(0.018, 0.026, 0.076),
+          carbonEdgeMat
+        );
+        microFin.position.set(0, 0.192, tailZ + 0.04);
+        microFin.rotation.x = -0.22;
+        rxGroup.add(microFin);
+
+        const finTrim = new THREE_LIB.Mesh(
+          new THREE_LIB.BoxGeometry(0.020, 0.007, 0.068),
           orangeAluminumMat
         );
-        tCenter.position.set(0, 0.072, tailZ - 0.085);
-        rxGroup.add(tCenter);
+        finTrim.position.set(0, 0.203, tailZ + 0.04);
+        finTrim.rotation.x = -0.22;
+        rxGroup.add(finTrim);
+      } else {
+        // Dual-Band Diversity: Twin Sleek Body-Hugging Aerodynamic Waveguide Shoulder Blisters (DJI OcuSync style — ZERO rods!)
+        const podX = bodyW * 0.36;
+        [-podX, podX].forEach(sx => {
+          const blister = new THREE_LIB.Mesh(
+            DroneModelBuilder.createChamferedPlateGeo(0.044, bodyD * 0.28, 0.026, 0.018, THREE_LIB),
+            motorBellMat
+          );
+          blister.position.set(sx, 0.168, tailZ + 0.06);
+          rxGroup.add(blister);
 
-        if (rxType === 'dual') {
-          // Additional Dual Vertical 2.4GHz Diversity SMA Rod Antennas (strictly inside safe rear deck!)
-          const smaX = bodyW * 0.28;
-          [-smaX, smaX].forEach(ax => {
-            const sma = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.014, 0.014, 0.028, 10), brassMat);
-            sma.position.set(ax, 0.170, tailZ + 0.05);
-            rxGroup.add(sma);
-
-            const rod = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.011, 0.009, 0.21, 10), darkRubberMat);
-            rod.position.set(ax, 0.280, tailZ + 0.05);
-            rod.rotation.z = ax > 0 ? -0.08 : 0.08;
-            rxGroup.add(rod);
-          });
-        }
+          const waveAccent = new THREE_LIB.Mesh(
+            new THREE_LIB.BoxGeometry(0.012, 0.006, bodyD * 0.20),
+            goldAccentMat
+          );
+          waveAccent.position.set(sx, 0.183, tailZ + 0.06);
+          rxGroup.add(waveAccent);
+        });
       }
 
       this.parts.rx = {
         group: rxGroup,
         basePos: new THREE_LIB.Vector3(0, 0, 0),
-        explodeOffset: new THREE_LIB.Vector3(-0.26, 0.20, -0.48)
+        explodeOffset: new THREE_LIB.Vector3(0, 0.24, -0.44)
       };
       this.droneGroup.add(rxGroup);
     }
 
     // ========================================================
-    // 10. เซนเซอร์ช่วยบิน (Optical Flow + Sonar / 360° Rotating LiDAR Turret)
+    // 10. เซนเซอร์ช่วยบิน (Optical Flow + Sonar / Flush Low-Profile 360° LiDAR + mmWave Optical Dome)
     // ========================================================
     if (p.sensor && (p.sensor.hasOpticalFlow || p.sensor.hasLidar)) {
       const sensorGroup = new THREE_LIB.Group();
       sensorGroup.name = 'sensor';
 
       // Under-Belly Optical Flow + Twin Metallic Ultrasonic/ToF Sonar Pod
-      const vpsPod = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.14, 0.035, 0.12), motorBellMat);
+      const vpsPod = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.14, 0.032, 0.12), motorBellMat);
       vpsPod.position.set(0, -0.032, -0.14);
       sensorGroup.add(vpsPod);
 
       [-0.036, 0.036].forEach(sx => {
-        const sonar = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.022, 0.022, 0.020, 14), silverShaftMat);
-        sonar.position.set(sx, -0.052, -0.14);
+        const sonar = new THREE_LIB.Mesh(new THREE_LIB.CylinderGeometry(0.021, 0.021, 0.018, 14), silverShaftMat);
+        sonar.position.set(sx, -0.050, -0.14);
         sensorGroup.add(sonar);
       });
 
       const flowLens = new THREE_LIB.Mesh(
-        new THREE_LIB.CylinderGeometry(0.014, 0.014, 0.022, 12),
+        new THREE_LIB.CylinderGeometry(0.014, 0.014, 0.020, 12),
         new THREE_LIB.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.1, metalness: 0.9 })
       );
-      flowLens.position.set(0, -0.052, -0.18);
+      flowLens.position.set(0, -0.050, -0.18);
       sensorGroup.add(flowLens);
 
-      // Top Forward 360° Rotating LiDAR Laser Scanner Turret!
+      // Flush Low-Profile Forward 360° LiDAR / mmWave Optical Dome seated cleanly on nose crown!
       if (p.sensor.hasLidar) {
-        const lidarZ = bodyD * 0.33;
-        const ls = Math.min(0.95, bodyW / 0.36);
+        const lidarZ = bodyD * 0.35;
+        const ls = Math.min(0.84, bodyW / 0.40);
         const lidarMount = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(0.086 * ls, 0.096 * ls, 0.028, 22),
+          new THREE_LIB.CylinderGeometry(0.076 * ls, 0.090 * ls, 0.020, 22),
           carbonEdgeMat
         );
-        lidarMount.position.set(0, 0.176, lidarZ);
+        lidarMount.position.set(0, 0.186, lidarZ);
         sensorGroup.add(lidarMount);
 
-        // Translucent Tinted Laser Optical Ring Window
+        // Sleek Low-Profile Tinted Panoramic Optical Ring Window
         const lidarGlass = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(0.080 * ls, 0.080 * ls, 0.058, 24),
+          new THREE_LIB.CylinderGeometry(0.072 * ls, 0.074 * ls, 0.038, 24),
           new THREE_LIB.MeshStandardMaterial({
-            color: 0x1e1b4b,
+            color: 0x0f172a,
             emissive: 0x38bdf8,
-            emissiveIntensity: 0.28,
+            emissiveIntensity: 0.24,
             transparent: true,
-            opacity: 0.72,
-            roughness: 0.08,
-            metalness: 0.85
+            opacity: 0.78,
+            roughness: 0.06,
+            metalness: 0.88
           })
         );
-        lidarGlass.position.set(0, 0.219, lidarZ);
+        lidarGlass.position.set(0, 0.214, lidarZ);
         sensorGroup.add(lidarGlass);
 
         // Animated Spinning Internal Optical Laser Mirror!
         const rotorGrp = new THREE_LIB.Group();
-        rotorGrp.position.set(0, 0.219, lidarZ);
-        const mirrorHead = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.098 * ls, 0.038, 0.038 * ls), silverShaftMat);
+        rotorGrp.position.set(0, 0.214, lidarZ);
+        const mirrorHead = new THREE_LIB.Mesh(new THREE_LIB.BoxGeometry(0.088 * ls, 0.026, 0.032 * ls), silverShaftMat);
         rotorGrp.add(mirrorHead);
         const laserDot = new THREE_LIB.Mesh(
-          new THREE_LIB.SphereGeometry(0.013 * ls, 8, 8),
+          new THREE_LIB.SphereGeometry(0.011 * ls, 8, 8),
           new THREE_LIB.MeshBasicMaterial({ color: 0x38bdf8 })
         );
-        laserDot.position.set(0.052 * ls, 0, 0);
+        laserDot.position.set(0.046 * ls, 0, 0);
         rotorGrp.add(laserDot);
         sensorGroup.add(rotorGrp);
         this.lidarRotor = rotorGrp;
 
-        // Top Lidar Cap with Orange Precision Ring
+        // Low Domed Aerospace Top Cap with Thin Anodized Accent Ring
         const lidarCap = new THREE_LIB.Mesh(
-          new THREE_LIB.CylinderGeometry(0.084 * ls, 0.084 * ls, 0.020, 22),
+          new THREE_LIB.SphereGeometry(0.074 * ls, 22, 10, 0, Math.PI * 2, 0, Math.PI * 0.45),
           motorBellMat
         );
-        lidarCap.position.set(0, 0.258, lidarZ);
+        lidarCap.scale.set(1.0, 0.36, 1.0);
+        lidarCap.position.set(0, 0.232, lidarZ);
         lidarCap.castShadow = true;
         sensorGroup.add(lidarCap);
 
         const capRing = new THREE_LIB.Mesh(
-          new THREE_LIB.TorusGeometry(0.066 * ls, 0.007, 8, 22),
+          new THREE_LIB.TorusGeometry(0.064 * ls, 0.005, 8, 22),
           orangeAluminumMat
         );
         capRing.rotation.x = Math.PI / 2;
-        capRing.position.set(0, 0.269, lidarZ);
+        capRing.position.set(0, 0.236, lidarZ);
         sensorGroup.add(capRing);
       }
 
@@ -1941,29 +2020,29 @@ class DroneModelBuilder {
       const pType = p.payload.payloadType;
 
       if (pType === 'sprayer') {
-        // Translucent Agricultural Liquid Fertilizer Tank + Live Fluid Mesh + Pump + Dual Nozzles!
-        const tankW = 0.46, tankH = 0.28, tankD = 0.50;
-        const tankY = -0.18;
+        // Contoured Translucent Agricultural Liquid Fertilizer Tank (DJI Agras style) + Live Fluid Mesh + Pump + Dual Nozzles!
+        const tankW = 0.46, tankH = 0.26, tankD = 0.50;
+        const tankY = -0.175;
 
         const tankShell = new THREE_LIB.Mesh(
-          new THREE_LIB.BoxGeometry(tankW, tankH, tankD),
+          DroneModelBuilder.createChamferedPlateGeo(tankW, tankD, tankH, 0.09, THREE_LIB),
           new THREE_LIB.MeshStandardMaterial({
             color: 0xe0f2fe,
             transparent: true,
-            opacity: 0.42,
-            roughness: 0.18,
-            metalness: 0.05
+            opacity: 0.44,
+            roughness: 0.16,
+            metalness: 0.06
           })
         );
         tankShell.position.set(0, tankY, -0.02);
         tankShell.castShadow = true;
         payloadGroup.add(tankShell);
 
-        // Live Dynamic Liquid Level Inside Tank (scales vertically as fertilizer is sprayed!)
-        this.tankLiquidBaseH = tankH * 0.84;
-        this.tankLiquidBaseY = tankY - tankH * 0.46;
+        // Live Dynamic Liquid Level Inside Contoured Tank (scales vertically as fertilizer is sprayed!)
+        this.tankLiquidBaseH = tankH * 0.82;
+        this.tankLiquidBaseY = tankY - tankH * 0.45;
         const liquidMesh = new THREE_LIB.Mesh(
-          new THREE_LIB.BoxGeometry(tankW * 0.90, this.tankLiquidBaseH, tankD * 0.90),
+          DroneModelBuilder.createChamferedPlateGeo(tankW * 0.88, tankD * 0.88, this.tankLiquidBaseH, 0.075, THREE_LIB),
           new THREE_LIB.MeshStandardMaterial({
             color: 0x0ea5e9,
             emissive: 0x0284c7,
@@ -2690,10 +2769,23 @@ class DroneModelBuilder {
       }
     }
 
-    // 6. Blink Navigation & Telemetry LEDs
-    const time = Date.now() * 0.005;
+    // 6. Blink Navigation & Telemetry LEDs (reacts to RF dead zones & warnings on the 3D drone!)
+    const sigState = auxState && auxState.signalState ? auxState.signalState : 'good';
+    const isCritLed = Boolean((auxState && auxState.isWarningLed) || sigState === 'critical');
+    const isWarnLed = !isCritLed && sigState === 'weak';
+    const ledRate = isCritLed ? 0.022 : isWarnLed ? 0.013 : 0.005;
+    const ledScale = isCritLed ? 1.35 : isWarnLed ? 1.22 : 1.0;
+    const blinkOn = Math.sin(Date.now() * ledRate) > (isCritLed ? 0.0 : -0.2);
+
+    if (this.paintMats && this.paintMats.rearLed) {
+      const targetHex = isCritLed ? 0xff2222 : isWarnLed ? 0xf59e0b : 0xef4444;
+      if (this.paintMats.rearLed.color.getHex() !== targetHex) {
+        this.paintMats.rearLed.color.setHex(targetHex);
+      }
+    }
     this.leds.forEach(led => {
-      led.visible = Math.sin(time) > -0.2;
+      led.visible = blinkOn;
+      led.scale.setScalar(ledScale);
     });
   }
 }

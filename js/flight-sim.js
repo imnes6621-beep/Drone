@@ -43,10 +43,30 @@ class DroneFlightSimulator {
     this.holdTargetPos = new THREE.Vector3(0, 0.48, 0);
     this.holdTargetLocked = false;
     this.windEst = new THREE.Vector2(0, 0);
-    this.rthPhase = 'IDLE'; // 'IDLE' | 'CLIMB' | 'RETURN' | 'DESCEND'
+    this.rthPhase = 'IDLE'; // 'IDLE' | 'CLIMB' | 'PATH_RETURN' | 'RETURN' | 'DESCEND'
     this.rthCruiseAlt = 22;
+    this.flightPathHistory = []; // Odometry breadcrumb trail [{ x, y, z }] recorded every 3.5m for sensor-loss backtracking!
+    this.rthWaypoints = [];      // Calculated obstacle-avoiding return waypoints [{ x, y, z, kind }]
+    this.rthWaypointIdx = 0;
+    this.rthAlgoLabel = '';      // 'A* หลบสิ่งกีดขวาง' | 'Breadcrumb ย้อนรอย + A*' | 'IMU ย้อนรอยจุดเริ่มต้น'
+    this.rthTotalPathDist = 0;
+    this.isFailsafeReturn = false;
+    this.sensorLostSim = false;
+    this.signalLossTimer = 0;
+    this.rthPathVisuals = null;
     this.liveWindVec = new THREE.Vector3(0, 0, 0);
     this.liveWindSpeed = 0;
+    this.liveWindDirRad = Math.atan2(0.4, 0.7);
+    this.liveWindDirDeg = 60;
+    this.liveWindVertical = 0;
+    this.windPreset = 'mission'; // 'mission' | 'calm' | 'moderate' | 'strong' | 'storm'
+    this.windShelterFactor = 1.0; // 1.0 open sky -> 0.15 sheltered inside hangar
+    this.windGustFactor = 1.0;
+    this.windGustActive = false;
+    this.windLevel = 'calm'; // 'calm' | 'moderate' | 'strong' | 'storm'
+    this.windStreaks = null;
+    this.windStreakData = [];
+    this._lastSprayDriftWarnMs = 0;
     this.vrsIntensity = 0;
     this.igeFactor = 1.0;
     this.airDensity = 1.225;
@@ -57,25 +77,46 @@ class DroneFlightSimulator {
     this.hudAlertText = '';
     this.hudAlertUntil = 0;
 
-    // 12-Part Subsystem Live State (RX RSSI, LiDAR, Agri Sprayer / Cargo, Recovery Parachute)
+    // 12-Part Subsystem Live State (RX RSSI, RF Signal Dead Zones, LiDAR, Agri Sprayer / Cargo, Recovery Parachute)
     this.payloadPercent = 100;
     this.isSpraying = false;
     this.cargoAttached = true;
     this.parachuteDeployed = false;
     this.rssiPercent = 100;
+    this.smoothedRssi = 100;
+    this.signalState = 'good'; // 'good' | 'weak' | 'critical'
+    this.signalSource = 'clear'; // 'clear' | 'tree' | 'hangar' | 'building' | 'emi_5g' | 'emi_radar' | 'terrain' | 'range'
+    this.signalObstruction = 0; // 0..1 combined obstruction/EMI severity
+    this.gpsMultipathFactor = 1.0;
+    this.insideMetalRoof = false;
+    this._lastSignalState = 'good';
+    this._lastSignalBeepMs = 0;
     this.lidarBraking = false;
+    this.lidarZone = 'off'; // 'off' | 'clear' | 'detect' | 'brake'
+    this.lidarNearestDist = null;
+    this.lidarNearestDirTh = '';
+    this.lidarNearestTag = '';
+    this.lidarNearestPoint = new THREE.Vector3();
+    this.groundClearanceM = 0; // Exact AGL distance from drone bottom to ground/roof below
+    this.homeAltitudeM = 0;    // Barometric altitude relative to home takeoff pad
+    this.surfaceBelowY = 0;
+    this.altSensorType = 'BARO'; // 'RADAR+TOF' | 'SONAR' | 'BARO' | 'NONE'
+    this.altSensorLocked = false;
+    this.sensorVisuals = null;
     this.sprayPoints = null;
     this.sprayData = [];
     this.droppedCargoMesh = null;
     this.droppedCargoVel = new THREE.Vector3();
     this.droppedCargoLanded = true;
 
-    // Live Thailand Drone Law (CAAT / NBTC) Compliance Monitoring
+    // Live Thailand Drone Law (CAAT / NBTC) Compliance & Frame Altitude Ceiling Monitoring
     this.lawOverCeiling = false;
     this.lawAltitudeViolated = false;
     this.lawVlosWarned = false;
     this.lawVillageWarned = false;
     this._lastLawBeepMs = 0;
+    this.hitAltitudeLimit = false;
+    this._lastAltLimitAlertMs = 0;
 
     // Real-World Start / Stop Propulsion State Machine (DISARMED / PRE_ARMING / ARMED_IDLE / AUTO_TAKEOFF / FLYING / AUTO_LANDING)
     this.powerState = 'DISARMED';
@@ -240,6 +281,7 @@ class DroneFlightSimulator {
     this.customMapRoot = null;
     this.solidTerrainMeshes = [];
     this.colliders = [];
+    this.powerWireSegments = [];
     this.groundRaycaster = new THREE.Raycaster();
     this.wallRaycaster = new THREE.Raycaster();
     this.buildWorld();
@@ -361,24 +403,26 @@ class DroneFlightSimulator {
     if (this.audioInitialized && this.audioCtx) {
       if (this.motorGain) this.motorGain.gain.setTargetAtTime(0.0001, this.audioCtx.currentTime, 0.05);
       if (this.noiseGain) this.noiseGain.gain.setTargetAtTime(0.0001, this.audioCtx.currentTime, 0.05);
+      if (this.windGain) this.windGain.gain.setTargetAtTime(0.0001, this.audioCtx.currentTime, 0.05);
     }
   }
 
-  addBoxCollider(cx, cy, cz, sx, sy, sz) {
+  addBoxCollider(cx, cy, cz, sx, sy, sz, tag = 'building') {
     this.colliders.push({
       type: 'box',
+      tag,
       minX: cx - sx / 2, maxX: cx + sx / 2,
       minY: cy - sy / 2, maxY: cy + sy / 2,
       minZ: cz - sz / 2, maxZ: cz + sz / 2
     });
   }
 
-  addCylCollider(x, z, radius, minY, maxY) {
-    this.colliders.push({ type: 'cyl', x, z, radius, minY, maxY });
+  addCylCollider(x, z, radius, minY, maxY, tag = 'building') {
+    this.colliders.push({ type: 'cyl', tag, x, z, radius, minY, maxY });
   }
 
-  addConeCollider(x, z, baseR, height) {
-    this.colliders.push({ type: 'cone', x, z, baseR, height });
+  addConeCollider(x, z, baseR, height, tag = 'terrain') {
+    this.colliders.push({ type: 'cone', tag, x, z, baseR, height });
   }
 
   tryLoadCustomMapGLB() {
@@ -1477,6 +1521,7 @@ class DroneFlightSimulator {
 
       pylon.add(post, band, bulb);
       this.scene.add(pylon);
+      this.addCylCollider(px, pz, 0.42, py, py + 8.6, 'power_pole');
 
       ringPts.push(new THREE.Vector3(px, py + 5.5, pz));
     }
@@ -1714,7 +1759,7 @@ class DroneFlightSimulator {
       wt.add(rotor);
       this.scene.add(wt);
       this.windTurbineRotors.push(rotor);
-      this.addCylCollider(tx, tz, 2.2, ty, ty + 38.5);
+      this.addCylCollider(tx, tz, 2.2, ty, ty + 38.5, 'wind_turbine');
     });
   }
 
@@ -2313,14 +2358,14 @@ class DroneFlightSimulator {
     this.scene.add(hangarGroup);
 
     // Hangar Solid Colliders (side walls, back wall, front header, retracted doors, roof & exterior fuel tank — center bay stays open!)
-    this.addBoxCollider(66, 3.1, -12 - 11.6, 16.4, 6.2, 1.0); // North wall
-    this.addBoxCollider(66, 3.1, -12 + 11.6, 16.4, 6.2, 1.0); // South wall
-    this.addBoxCollider(66 + 7.65, 3.1, -12, 1.0, 6.2, 24.4); // East back wall
-    this.addBoxCollider(66 - 7.6, 5.5, -12, 1.1, 1.6, 24.4);  // Front upper header beam
-    this.addBoxCollider(66 - 8.1, 2.5, -12 - 9.6, 0.8, 4.8, 3.7); // North retracted door leaf
-    this.addBoxCollider(66 - 8.1, 2.5, -12 + 9.6, 0.8, 4.8, 3.7); // South retracted door leaf
-    this.addBoxCollider(66, 7.8, -12, 17.8, 3.4, 25.0);       // Pitched A-frame roof + ridge ventilator mass
-    this.addBoxCollider(68.2, 1.5, -26.2, 5.8, 3.0, 2.8);     // Exterior AVGAS fuel storage tank
+    this.addBoxCollider(66, 3.1, -12 - 11.6, 16.4, 6.2, 1.0, 'hangar'); // North wall
+    this.addBoxCollider(66, 3.1, -12 + 11.6, 16.4, 6.2, 1.0, 'hangar'); // South wall
+    this.addBoxCollider(66 + 7.65, 3.1, -12, 1.0, 6.2, 24.4, 'hangar'); // East back wall
+    this.addBoxCollider(66 - 7.6, 5.5, -12, 1.1, 1.6, 24.4, 'hangar');  // Front upper header beam
+    this.addBoxCollider(66 - 8.1, 2.5, -12 - 9.6, 0.8, 4.8, 3.7, 'hangar'); // North retracted door leaf
+    this.addBoxCollider(66 - 8.1, 2.5, -12 + 9.6, 0.8, 4.8, 3.7, 'hangar'); // South retracted door leaf
+    this.addBoxCollider(66, 7.8, -12, 17.8, 3.4, 25.0, 'hangar');       // Pitched A-frame roof + ridge ventilator mass
+    this.addBoxCollider(68.2, 1.5, -26.2, 5.8, 3.0, 2.8, 'hangar');     // Exterior AVGAS fuel storage tank
 
     // Cargo Crates neatly stacked on hangar apron (not on the runway!)
     const crateMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.8 });
@@ -2970,9 +3015,9 @@ class DroneFlightSimulator {
     towerGroup.add(tSolarStand, tSolar, secAnt);
 
     this.scene.add(towerGroup);
-    this.addCylCollider(-16, -34, 5.65, 0, 3.6);     // Control tower lobby base
-    this.addCylCollider(-16, -34, 4.45, 3.4, 17.8);  // Control tower shaft + buttresses & elevator core
-    this.addCylCollider(-16, -34, 6.25, 17.6, 23.85); // Control tower cabin, roof deck & rooftop parapet
+    this.addCylCollider(-16, -34, 5.65, 0, 3.6, 'atc_tower');     // Control tower lobby base
+    this.addCylCollider(-16, -34, 4.45, 3.4, 17.8, 'atc_tower');  // Control tower shaft + buttresses & elevator core
+    this.addCylCollider(-16, -34, 6.25, 17.6, 23.85, 'atc_tower'); // Control tower cabin, roof deck & rooftop parapet
 
     // Detailed ICAO/FAA Illuminated Airport Windsock Assembly (Segmented Ground Circle, Hinged Striped Mast, Swivel Throat Ring & Rippling 5-Stripe Hollow Sock!)
     const wsGroup = new THREE.Group();
@@ -3106,7 +3151,7 @@ class DroneFlightSimulator {
     wsGroup.add(this.windsock);
 
     this.scene.add(wsGroup);
-    this.addCylCollider(-16.5, 10.5, 0.48, 0, 7.45);
+    this.addCylCollider(-16.5, 10.5, 0.22, 0, 7.45, 'power_pole');
   }
 
   buildHelipad() {
@@ -3304,7 +3349,7 @@ class DroneFlightSimulator {
         dummy.updateMatrix();
         pL4.setMatrixAt(i, dummy.matrix);
 
-        this.addCylCollider(t.x, t.z, 1.6 * t.s, y0, y0 + 9.0 * t.s);
+        this.addCylCollider(t.x, t.z, 1.6 * t.s, y0, y0 + 9.0 * t.s, 'tree');
       });
       this.scene.add(pAO, pTrunks, pL1, pL2, pL3, pL4);
     }
@@ -3361,7 +3406,7 @@ class DroneFlightSimulator {
         dummy.updateMatrix();
         puffTop.setMatrixAt(i, dummy.matrix);
 
-        this.addCylCollider(t.x, t.z, 2.3 * t.s, y0, y0 + 7.0 * t.s);
+        this.addCylCollider(t.x, t.z, 2.3 * t.s, y0, y0 + 7.0 * t.s, 'tree');
       });
       this.scene.add(ao, trunks, branches, puffMain, puffSide, puffTop);
     };
@@ -4373,6 +4418,7 @@ class DroneFlightSimulator {
       head.position.set(armDir * 0.65, 4.38, armDir === 0 ? (lz < 31 ? 0.65 : -0.65) : 0);
       lamp.add(pole, arm, head);
       this.scene.add(lamp);
+      this.addCylCollider(lx, lz, 0.35, 0, 4.7, 'power_pole');
     });
 
     // ------------------------------------------------------------
@@ -5856,7 +5902,7 @@ class DroneFlightSimulator {
     tower.add(beaconBase, cageRing, lightningPin);
 
     this.scene.add(tower);
-    this.addCylCollider(75, -70, 3.4, 0, 50.5); // 45m+ Tall 5G Telecom Tower solid collider
+    this.addCylCollider(75, -70, 3.4, 0, 50.5, 'telecom_5g'); // 45m+ Tall 5G Telecom Tower solid collider
   }
 
   buildMapLandmarks() {
@@ -7961,11 +8007,15 @@ class DroneFlightSimulator {
         pg.add(ins);
       });
       this.scene.add(pg);
+      this.addCylCollider(px, pz, 0.26, py, py + 7.6, 'power_pole');
 
       // Pair of gently sagging overhead power cables connecting to next pole
       if (i < powerPoles.length - 1) {
         const [nx, nz] = powerPoles[i + 1];
         const ny = this.getTerrainHeight(nx, nz);
+        if (this.powerWireSegments) {
+          this.powerWireSegments.push({ x1: px, y1: py + 7.25, z1: pz, x2: nx, y2: ny + 7.25, z2: nz, sag: 0.65 });
+        }
         const segLen = Math.hypot(nx - px, nz - pz);
         const perpX = -(nz - pz) / segLen;
         const perpZ = (nx - px) / segLen;
@@ -9526,6 +9576,12 @@ class DroneFlightSimulator {
 
     const maxClimbRate = twRatio > 1.02 ? Math.min(13.0, Math.max(0.32, (twRatio - 1.0) * 2.75)) : 0.12;
     const maxDescentRate = Math.min(6.4, Math.max(2.6, hoverInducedVel * 1.15));
+    // Real-World Drone Class Operational Altitude Ceiling (FPV 50m | Aerial 90m | Heavy Survey 120m | Agri Sprayer 30m!)
+    const maxAltitudeLimitM = frame.maxAltitudeLimitM
+      || (isAgri ? 30 : isSmall ? 50 : isLarge ? 120 : 90);
+    const frameClassLabel = frame.frameClassLabel
+      || (isAgri ? 'โดรนเกษตร (800 มม.)' : isSmall ? 'โดรน FPV (250 มม.)' : isLarge ? 'โดรนสำรวจหนัก (650 มม.)' : 'โดรนถ่ายภาพ (450 มม.)');
+    const altitudeLimitReason = frame.altitudeLimitReason || `จำกัดเพดานบินสูงสุด ${maxAltitudeLimitM} ม.`;
 
     // New subsystem capabilities
     const clearance = 0.48 + (safety.clearanceExtra || 0);
@@ -9545,12 +9601,14 @@ class DroneFlightSimulator {
       cdAHoriz, cdAVert, kRotorDrag,
       maxTiltRad, maxYawRate, omegaAtt, zetaAtt, kYaw,
       maxClimbRate, maxDescentRate,
+      maxAltitudeLimitM, frameClassLabel, altitudeLimitReason,
       hasBaro: Boolean(fc.hasBaro),
       dualImu: Boolean(fc.dualImu),
       gustRejectFactor: fc.dualImu ? 0.45 : 1.0,
       hasGps: Boolean(gps.hasGps),
       isRtk: Boolean(gps.isRtk),
       cameraType, hasGimbal,
+      rxType: rx.rxType || 'elrs',
       rxRangeMeters: rx.rangeMeters || 340,
       rxFailsafeRth: Boolean(rx.failsafeRth),
       hasOpticalFlow: Boolean(sensor.hasOpticalFlow),
@@ -9573,25 +9631,184 @@ class DroneFlightSimulator {
     return 3.20 + (s / 0.05) * 0.22;
   }
 
-  // Live 3D atmospheric wind field: altitude shear + spatio-temporal gusts + subtle vertical thermals
-  sampleWindField(x, y, z, t, outVec) {
-    const baseSpeed = this.mission ? Math.max(0.35, this.mission.windSpeed) : 1.0;
-    // Boundary-layer wind shear (calmer near ground, stronger at 45m tower & mountain ridges!)
-    const altShear = Math.max(0.60, Math.min(1.55, 0.60 + 0.40 * Math.pow(Math.max(0.5, y + 1.5) / 14.0, 0.22)));
-    // Organic multi-frequency gust factor & gentle directional veer
-    const gust = 1.0
-      + 0.17 * Math.sin(t * 0.62 + x * 0.018 + z * 0.014)
-      + 0.11 * Math.sin(t * 1.47 - x * 0.025 + z * 0.021)
-      + 0.06 * Math.cos(t * 2.85 + y * 0.045);
-    const speed = Math.max(0.05, baseSpeed * altShear * gust);
-    // Prevailing wind angle matches windsock (~29.7°) + slow ±11° wind shifts
+  // Wind Preset Profiles (KeyN / HUD Wind Switch) — live atmospheric wind tuning for teaching & demo!
+  getWindPresetInfo() {
+    const missionSpd = this.mission ? Math.max(0.35, this.mission.windSpeed) : 1.0;
+    const preset = this.windPreset || 'mission';
+    if (preset === 'calm') {
+      return { id: 'calm', baseSpeed: 0.6, gustScale: 0.16, squallAmp: 0.08, label: '🍃 ลมสงบ (0.6 ม./วิ)', shortLabel: '🍃 ลมสงบ (N)' };
+    }
+    if (preset === 'moderate') {
+      return { id: 'moderate', baseSpeed: 4.5, gustScale: 0.28, squallAmp: 0.22, label: '🌬️ ลมปานกลาง (4.5 ม./วิ)', shortLabel: '🌬️ ลมกลาง (N)' };
+    }
+    if (preset === 'strong') {
+      return { id: 'strong', baseSpeed: 8.5, gustScale: 0.34, squallAmp: 0.30, label: '💨 ลมแรง (8.5 ม./วิ)', shortLabel: '💨 ลมแรง (N)' };
+    }
+    if (preset === 'storm') {
+      return { id: 'storm', baseSpeed: 12.5, gustScale: 0.40, squallAmp: 0.36, label: '🌪️ พายุลมกระโชก (12.5 ม./วิ)', shortLabel: '🌪️ พายุลม (N)' };
+    }
+    return {
+      id: 'mission',
+      baseSpeed: missionSpd,
+      gustScale: 0.24,
+      squallAmp: missionSpd >= 3.5 ? 0.24 : 0.12,
+      label: `🍃 ลมตามฉาก (${missionSpd.toFixed(1)} ม./วิ)`,
+      shortLabel: `🌬️ ลม ${missionSpd.toFixed(1)} (N)`
+    };
+  }
+
+  cycleWindPreset() {
+    this.initAudio();
+    const order = ['mission', 'moderate', 'strong', 'storm', 'calm'];
+    const idx = order.indexOf(this.windPreset || 'mission');
+    this.windPreset = order[(idx + 1) % order.length];
+    const info = this.getWindPresetInfo();
+    this.playTone(this.windPreset === 'storm' ? 420 : this.windPreset === 'strong' ? 540 : 680, 0.11);
+    const tip = this.windPreset === 'storm'
+      ? ' — สังเกตโดรนเอียงสู้ลม กระแสไฟพุ่ง และถุงลม/กังหันหมุนเร็ว!'
+      : this.windPreset === 'strong'
+        ? ' — ทดสอบต้านลมขวาง (กด H สลับ ATTI เพื่อดูโดรนปลิวตามลม!)'
+        : this.windPreset === 'moderate'
+          ? ' — ลมระดับปฏิบัติงานจริง สังเกตความต่างระหว่างโดรนเบาและหนัก'
+          : '';
+    this.setHudAlert(`ปรับสภาพลม: ${info.label}${tip}`, 3200);
+    return info;
+  }
+
+  // Live 3D atmospheric wind field: logarithmic boundary-layer shear + Dryden-style rolling gust squalls + leeward wind shelter + vertical thermals!
+  sampleWindField(x, y, z, t, outVec, applyShelter = false) {
+    const wProf = this.getWindPresetInfo();
+    const baseSpeed = wProf.baseSpeed;
+
+    // 1. Atmospheric Boundary-Layer Wind Shear (Hellmann power-law: calmer near ground, ~1.5x stronger at 45m tower & ridges!)
+    const groundY = (typeof this.getTerrainHeight === 'function') ? this.getTerrainHeight(x, z) : 0;
+    const agl = Math.max(0.2, y - groundY);
+    const altShear = Math.max(0.52, Math.min(1.68, 0.42 + 0.58 * Math.pow((agl + 0.8) / 14.0, 0.30)));
+
+    // 2. Dryden-style multi-frequency turbulence + rolling gust squall pulses
+    const harmonic = 0.55 * Math.sin(t * 0.62 + x * 0.018 + z * 0.014)
+      + 0.30 * Math.sin(t * 1.47 - x * 0.025 + z * 0.021)
+      + 0.15 * Math.cos(t * 2.85 + y * 0.045);
+    const squallWave = 0.5 + 0.5 * Math.sin(t * 0.42 + x * 0.011 - z * 0.009);
+    const squallPulse = Math.pow(squallWave, 4.0) * wProf.squallAmp;
+    const gust = Math.max(0.55, 1.0 + harmonic * wProf.gustScale + squallPulse);
+
+    // 3. Leeward Wind Shelter (calmer indoors inside steel hangar or tucked behind trees/buildings!)
+    const shelter = applyShelter ? (this.windShelterFactor ?? 1.0) : 1.0;
+
+    const speed = Math.max(0.04, baseSpeed * altShear * gust * shelter);
+
+    // 4. Prevailing wind vector matches airfield windsock (~29.7° -> blows ENE/SE) + organic ±14° wind veer
     const baseAngle = Math.atan2(0.4, 0.7);
-    const dir = baseAngle + 0.14 * Math.sin(t * 0.31 + z * 0.012) + 0.06 * Math.cos(t * 0.83 - x * 0.015);
-    // Subtle vertical air turbulence (stronger in windy missions & near high ridges)
-    const wy = baseSpeed * 0.065 * altShear * (Math.sin(t * 1.15 + x * 0.03) + 0.5 * Math.cos(t * 2.2 - z * 0.03));
+    const dir = baseAngle
+      + 0.16 * Math.sin(t * 0.31 + z * 0.012)
+      + 0.07 * Math.cos(t * 0.83 - x * 0.015);
+
+    // 5. Vertical air currents (thermals & ridge updrafts/downdrafts, suppressed indoors)
+    const wy = baseSpeed * (0.072 + 0.04 * squallPulse) * altShear * shelter
+      * (Math.sin(t * 1.15 + x * 0.03) + 0.5 * Math.cos(t * 2.2 - z * 0.03));
 
     outVec.set(Math.cos(dir) * speed, wy, Math.sin(dir) * speed);
+    if (applyShelter) {
+      this.windGustFactor = gust;
+      this.windGustActive = baseSpeed >= 3.2 && gust >= 1.24;
+      this.liveWindDirRad = dir;
+      // Compass heading wind is blowing TOWARD (0°=N/-Z, 90°=E/+X, 180°=S/+Z, 270°=W/-X)
+      const heading = (Math.atan2(outVec.x, -outVec.z) * (180 / Math.PI) + 360) % 360;
+      this.liveWindDirDeg = Math.round(heading);
+      this.liveWindVertical = wy;
+    }
     return outVec;
+  }
+
+  // Lightweight 1-draw-call 3D Visual Wind Airflow Streaks around the drone (shows live wind direction & gust speed!)
+  initWindStreaks() {
+    if (this.windStreaks || !this.scene || typeof THREE === 'undefined') return;
+    const count = 44;
+    const positions = new Float32Array(count * 2 * 3);
+    this.windStreakData = [];
+    for (let i = 0; i < count; i++) {
+      this.windStreakData.push({
+        x: (Math.random() - 0.5) * 28,
+        y: (Math.random() - 0.35) * 14,
+        z: (Math.random() - 0.5) * 28,
+        lenScale: 0.75 + Math.random() * 0.65,
+        spdScale: 0.85 + Math.random() * 0.35
+      });
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0.0,
+      depthWrite: false
+    });
+    this.windStreaks = new THREE.LineSegments(geo, mat);
+    this.windStreaks.frustumCulled = false;
+    this.windStreaks.visible = false;
+    this.scene.add(this.windStreaks);
+  }
+
+  updateWindStreaks(delta) {
+    if (!this.windStreaks) this.initWindStreaks();
+    if (!this.windStreaks) return;
+    const spd = this.liveWindSpeed || 0;
+    if (spd < 1.8 || this.graphicsQuality === 'fast' && spd < 4.5) {
+      this.windStreaks.visible = false;
+      return;
+    }
+    this.windStreaks.visible = true;
+    const gustBoost = this.windGustActive ? 0.14 : 0;
+    this.windStreaks.material.opacity = Math.min(0.56, Math.max(0.08, (spd - 1.5) / 14.0) + gustBoost);
+    this.windStreaks.material.color.setHex(spd >= 10.5 ? 0xfecaca : spd >= 7.5 ? 0xfde68a : 0xe0f2fe);
+
+    const wx = this.liveWindVec.x;
+    const wy = this.liveWindVec.y;
+    const wz = this.liveWindVec.z;
+    const invSpd = 1 / Math.max(0.1, Math.hypot(wx, wy, wz));
+    const dx = wx * invSpd;
+    const dy = wy * invSpd;
+    const dz = wz * invSpd;
+    const baseLen = Math.min(3.8, 0.55 + spd * 0.24);
+    const px = this.position.x;
+    const py = this.position.y;
+    const pz = this.position.z;
+
+    const posAttr = this.windStreaks.geometry.attributes.position;
+    const arr = posAttr.array;
+    const halfSpan = 15;
+    const halfY = 7.5;
+
+    for (let i = 0; i < this.windStreakData.length; i++) {
+      const s = this.windStreakData[i];
+      const adv = (spd * 1.15 * s.spdScale) * delta;
+      s.x += dx * adv;
+      s.y += dy * adv;
+      s.z += dz * adv;
+
+      // Wrap seamlessly inside moving volume centered around drone
+      if (s.x > halfSpan) s.x -= halfSpan * 2;
+      else if (s.x < -halfSpan) s.x += halfSpan * 2;
+      if (s.z > halfSpan) s.z -= halfSpan * 2;
+      else if (s.z < -halfSpan) s.z += halfSpan * 2;
+      if (s.y > halfY) s.y -= halfY * 2;
+      else if (s.y < -halfY) s.y += halfY * 2;
+
+      const x0 = px + s.x;
+      const y0 = Math.max(this.getTerrainHeight(x0, pz + s.z) + 0.4, py + s.y);
+      const z0 = pz + s.z;
+      const len = baseLen * s.lenScale;
+
+      const idx = i * 6;
+      arr[idx] = x0;
+      arr[idx + 1] = y0;
+      arr[idx + 2] = z0;
+      arr[idx + 3] = x0 - dx * len;
+      arr[idx + 4] = y0 - dy * len;
+      arr[idx + 5] = z0 - dz * len;
+    }
+    posAttr.needsUpdate = true;
   }
 
   setHudAlert(msg, durationMs = 2600) {
@@ -9620,6 +9837,7 @@ class DroneFlightSimulator {
   // Setup Mission
   setMission(mission) {
     this.mission = mission;
+    this.windPreset = 'mission';
     this.clearCheckpoints();
 
     if (mission.checkpoints && mission.checkpoints.length > 0) {
@@ -9668,6 +9886,15 @@ class DroneFlightSimulator {
     this.isRTHMode = false;
     this.rthPhase = 'IDLE';
     this.rthCruiseAlt = startY + 22;
+    this.flightPathHistory = [{ x: 0, y: startY, z: 0 }];
+    this.rthWaypoints = [];
+    this.rthWaypointIdx = 0;
+    this.rthAlgoLabel = '';
+    this.rthTotalPathDist = 0;
+    this.isFailsafeReturn = false;
+    this.sensorLostSim = false;
+    this.signalLossTimer = 0;
+    if (typeof this.clearRthPathVisuals === 'function') this.clearRthPathVisuals();
     this.holdAltitude = startY;
     this.altHoldLocked = true;
     this.holdTargetPos.set(0, startY, 0);
@@ -9692,7 +9919,23 @@ class DroneFlightSimulator {
     this.cargoAttached = true;
     this.parachuteDeployed = false;
     this.rssiPercent = 100;
+    this.smoothedRssi = 100;
+    this.signalState = 'good';
+    this.signalSource = 'clear';
+    this.signalObstruction = 0;
+    this.gpsMultipathFactor = 1.0;
+    this.insideMetalRoof = false;
+    this._lastSignalState = 'good';
+    this._lastSignalBeepMs = 0;
     this.lidarBraking = false;
+    this.lidarZone = 'off';
+    this.lidarNearestDist = null;
+    this.lidarNearestDirTh = '';
+    this.lidarNearestTag = '';
+    this.groundClearanceM = 0;
+    this.homeAltitudeM = 0;
+    this.surfaceBelowY = startY - (p ? (p.clearance || 0.48) : 0.48);
+    this.altSensorLocked = false;
     if (this.droppedCargoMesh) {
       this.droppedCargoMesh.visible = false;
       this.droppedCargoLanded = true;
@@ -9704,6 +9947,8 @@ class DroneFlightSimulator {
     this.lawVlosWarned = false;
     this.lawVillageWarned = false;
     this._lastLawBeepMs = 0;
+    this.hitAltitudeLimit = false;
+    this._lastAltLimitAlertMs = 0;
     this.powerState = 'DISARMED';
     this.preArmTimer = 0;
     this.pendingAutoTakeoff = false;
@@ -10007,7 +10252,13 @@ class DroneFlightSimulator {
 
     this.isArmed = false;
     this.isRTHMode = false;
+    this.isFailsafeReturn = false;
+    this.sensorLostSim = false;
+    this.signalLossTimer = 0;
     this.rthPhase = 'IDLE';
+    this.rthWaypoints = [];
+    this.rthWaypointIdx = 0;
+    if (typeof this.clearRthPathVisuals === 'function') this.clearRthPathVisuals();
     this.isSpraying = false;
     this.pendingAutoTakeoff = false;
     this.autoLandSettleTimer = 0;
@@ -10202,6 +10453,24 @@ class DroneFlightSimulator {
         this.noiseGain.connect(this.audioFilter);
         this.noiseNode.start();
 
+        // 5. Ambient Atmospheric Wind Whoosh (bandpass-filtered airflow swells naturally in strong crosswind & gusts!)
+        this.windNode = this.audioCtx.createBufferSource();
+        this.windNode.buffer = noiseBuffer;
+        this.windNode.loop = true;
+
+        this.windFilter = this.audioCtx.createBiquadFilter();
+        this.windFilter.type = 'bandpass';
+        this.windFilter.frequency.setValueAtTime(340, this.audioCtx.currentTime);
+        this.windFilter.Q.setValueAtTime(1.4, this.audioCtx.currentTime);
+
+        this.windGain = this.audioCtx.createGain();
+        this.windGain.gain.setValueAtTime(0.0001, this.audioCtx.currentTime);
+
+        this.windNode.connect(this.windFilter);
+        this.windFilter.connect(this.windGain);
+        this.windGain.connect(this.masterGain);
+        this.windNode.start();
+
         this.audioInitialized = true;
       }
     } catch (e) {
@@ -10239,11 +10508,18 @@ class DroneFlightSimulator {
     this.camInitialized = false;
     const btnCam = document.getElementById('btn-toggle-camera');
     if (btnCam) {
-      btnCam.innerText = this.isFPV ? '📷 FPV' : '📷 มุมมองที่ 3';
+      btnCam.innerText = this.isFPV ? '📷 FPV (V)' : '📷 มุมมองที่ 3 (V)';
       btnCam.classList.toggle('primary', this.isFPV);
     }
     const reticle = document.getElementById('fpv-crosshair-hud');
     if (reticle) reticle.classList.toggle('hidden', !this.isFPV);
+    if (typeof this.setHudAlert === 'function') {
+      const p = this.physicsParams;
+      const camModeTxt = this.isFPV
+        ? (p && p.hasGimbal ? '📷 มุมมองบุคคลที่ 1 (FPV · กิมบอลกันสั่น 3 แกน)' : '📷 มุมมองบุคคลที่ 1 (FPV · มุมกล้องนักบิน)')
+        : '🎥 มุมมองบุคคลที่ 3 (กล้องติดตามหลังลำ)';
+      this.setHudAlert(camModeTxt, 2000);
+    }
     return this.isFPV;
   }
 
@@ -10266,7 +10542,7 @@ class DroneFlightSimulator {
         this.targetCamYaw = 0;
         this.targetCamPitch = 0.18;
       }
-      if (e.code === 'KeyV') {
+      if (e.code === 'KeyV' && !e.repeat) {
         this.toggleCamera();
       }
       if (e.code === 'KeyM') {
@@ -10294,30 +10570,20 @@ class DroneFlightSimulator {
           }
         }
       }
-      if (e.code === 'KeyR') {
+      if (e.code === 'KeyR' && !e.repeat) {
         const p = this.physicsParams || this.computeDronePhysicsParams();
-        if (!p.hasGps) {
-          this.isRTHMode = false;
+        if (this.isRTHMode) {
+          this.cancelSmartAutoReturn('ยกเลิก RTH — นักบินรับช่วงควบคุม');
+        } else if (!p.hasGps && (!this.flightPathHistory || this.flightPathHistory.length < 2)) {
           this.playTone(240, 0.16);
-          this.setHudAlert('ต้องติดตั้ง GPS จึงจะใช้ RTH บินกลับฐานได้');
+          this.setHudAlert('ต้องติดตั้ง GPS หรือบินออกจากจุดเริ่มต้นก่อนจึงจะคำนวณเส้นทางกลับได้');
         } else {
-          this.isRTHMode = !this.isRTHMode;
-          if (this.isRTHMode) {
-            if (!this.isArmed) this.startDrone({ instant: true, autoTakeoff: false });
-            this.isHoldMode = true;
-            this.rthPhase = 'CLIMB';
-            this.rthCruiseAlt = Math.max(this.position.y + 3.0, this.getTerrainHeight(0, 0) + 22.0);
-            this.playTone(880, 0.15);
-            this.setHudAlert('🏠 เปิด RTH — ไต่ระดับและบินกลับลานจอด H อัตโนมัติ');
-          } else {
-            this.rthPhase = 'IDLE';
-            this.holdAltitude = this.position.y;
-            this.holdTargetPos.copy(this.position);
-            this.holdTargetLocked = false;
-            this.playTone(500, 0.12);
-            this.setHudAlert('ยกเลิก RTH — นักบินรับช่วงควบคุม');
-          }
+          if (!this.isArmed) this.startDrone({ instant: true, autoTakeoff: false });
+          this.triggerSmartAutoReturn('สั่ง RTH คำนวณเส้นทางกลับฐานอัตโนมัติ', false, false);
         }
+      }
+      if (e.code === 'KeyP' && !e.repeat) {
+        this.toggleSimulatedSensorLoss();
       }
       if (e.code === 'KeyF' && !e.repeat) {
         this.togglePayloadAction();
@@ -10336,6 +10602,9 @@ class DroneFlightSimulator {
       }
       if (e.code === 'KeyG' && !e.repeat) {
         this.cycleControlRateMode();
+      }
+      if (e.code === 'KeyN' && !e.repeat) {
+        this.cycleWindPreset();
       }
       if (e.code === 'Space' && !this.isArmed && this.powerState !== 'PRE_ARMING') {
         this.startDrone({ instant: true, autoTakeoff: false });
@@ -10437,6 +10706,9 @@ class DroneFlightSimulator {
     this.updatePhysics(delta);
     this.updatePayloadEffects(delta);
     this.updateWindsock(delta);
+    this.updateWindStreaks(delta);
+    this.updateSensorVisuals();
+    this.updateRthPathVisuals();
     this.updateCheckpoints();
     this.updateCamera(delta);
     this.updateAudio();
@@ -10457,10 +10729,10 @@ class DroneFlightSimulator {
       }
     }
 
-    // Throttle HUD DOM updates to ~10 Hz (instant on state/mode/alert/checkpoint changes) to eliminate DOM reflow overhead!
+    // Throttle HUD DOM updates to ~10 Hz (instant on state/mode/alert/signal/wind/checkpoint changes) to eliminate DOM reflow overhead!
     const vrsWarn = this.vrsIntensity > 0.35;
     const alertActive = nowMs < (this.hudAlertUntil || 0);
-    const stateSig = `${this.isArmed}|${this.powerState}|${this.controlRateMode}|${this.graphicsQuality}|${this.isLanded}|${this.isCrashed}|${this.isHoldMode}|${this.isRTHMode}|${this.rthPhase}|${vrsWarn}|${this.lidarBraking}|${this.isSpraying}|${this.parachuteDeployed}|${this.lawOverCeiling}|${alertActive}|${this.completedCheckpoints}`;
+    const stateSig = `${this.isArmed}|${this.powerState}|${this.controlRateMode}|${this.graphicsQuality}|${this.isLanded}|${this.isCrashed}|${this.isHoldMode}|${this.isRTHMode}|${this.rthPhase}|${this.isFailsafeReturn}|${this.sensorLostSim}|${this.rthWaypointIdx}|${vrsWarn}|${this.lidarBraking}|${this.lidarZone}|${this.altSensorType}|${this.altSensorLocked}|${this.isSpraying}|${this.parachuteDeployed}|${this.lawOverCeiling}|${this.hitAltitudeLimit}|${this.signalState}|${this.signalSource}|${this.windPreset}|${this.windLevel}|${this.windGustActive}|${alertActive}|${this.completedCheckpoints}`;
     if (nowMs - (this._lastTelemetryTime || 0) >= 100 || stateSig !== this._lastTelemetryState) {
       this._lastTelemetryTime = nowMs;
       this._lastTelemetryState = stateSig;
@@ -10493,13 +10765,14 @@ class DroneFlightSimulator {
     if (this.radarDish) {
       this.radarDish.rotation.y += delta * 1.4;
     }
+    const wSpin = Math.max(0.45, Math.min(4.8, 0.55 + (this.liveWindSpeed || 1.0) * 0.32));
     if (this.windTurbineRotors) {
       for (let i = 0; i < this.windTurbineRotors.length; i++) {
-        this.windTurbineRotors[i].rotation.z -= delta * (1.2 + i * 0.18);
+        this.windTurbineRotors[i].rotation.z -= delta * (wSpin + i * 0.14);
       }
     }
     if (this.windmillSail) {
-      this.windmillSail.rotation.z -= delta * 0.48;
+      this.windmillSail.rotation.z -= delta * (0.28 + wSpin * 0.35);
     }
     if (!isFastMode) {
       if (this.waterTex) {
@@ -10535,8 +10808,9 @@ class DroneFlightSimulator {
         this.waterfallTex.offset.y = (this.waterfallTex.offset.y + delta * 0.55) % 1;
       }
       if (this.clouds) {
+        const cloudDrift = Math.max(0.7, Math.min(6.5, 0.65 + (this.liveWindSpeed || 1.0) * 0.42));
         for (let i = 0; i < this.clouds.length; i++) {
-          this.clouds[i].position.x += delta * 1.1;
+          this.clouds[i].position.x += delta * cloudDrift;
           if (this.clouds[i].position.x > 260) this.clouds[i].position.x = -260;
         }
       }
@@ -10557,7 +10831,10 @@ class DroneFlightSimulator {
           payloadFraction: this.payloadPercent / 100,
           isSpraying: this.isSpraying && this.isArmed && !this.isLanded && this.payloadPercent > 0,
           cargoAttached: this.cargoAttached,
-          parachuteDeployed: this.parachuteDeployed
+          parachuteDeployed: this.parachuteDeployed,
+          signalState: this.signalState,
+          lawOverCeiling: this.lawOverCeiling,
+          isWarningLed: this.isCrashed || this.batteryPercent <= 25 || this.lawOverCeiling || this.vrsIntensity > 0.35 || this.signalState === 'critical'
         }
       );
     }
@@ -10707,21 +10984,89 @@ class DroneFlightSimulator {
     return (1 - expo) * val + expo * val * val * val;
   }
 
-  // 360° LiDAR active obstacle proximity repulsive brake (when sensor_lidar is installed!)
+  // Exact downward surface height directly under the drone (terrain, raised Helipad, OR solid building/hangar roof!)
+  sampleSurfaceBelowY(px, py, pz) {
+    let surfY = (typeof this.getTerrainHeight === 'function') ? this.getTerrainHeight(px, pz) : 0;
+    if (this.helipad) {
+      const hx = px - this.helipad.position.x;
+      const hz = pz - this.helipad.position.z;
+      if (hx * hx + hz * hz <= 6.2 * 6.2) {
+        const padTop = this.helipad.position.y + 0.075;
+        if (padTop <= py + 0.35 && padTop > surfY) surfY = padTop;
+      }
+    }
+    if (!this.customMapRoot && this.colliders && this.colliders.length > 0) {
+      for (let i = 0; i < this.colliders.length; i++) {
+        const c = this.colliders[i];
+        if (c.type === 'box') {
+          if (px >= c.minX && px <= c.maxX && pz >= c.minZ && pz <= c.maxZ && c.maxY <= py + 0.35 && c.maxY > surfY) {
+            surfY = c.maxY;
+          }
+        } else if (c.type === 'cyl' && c.tag !== 'tree') {
+          const d = Math.hypot(px - c.x, pz - c.z);
+          if (d <= c.radius && c.maxY <= py + 0.35 && c.maxY > surfY) {
+            surfY = c.maxY;
+          }
+        }
+      }
+    }
+    return surfY;
+  }
+
+  // Evaluate ground-to-drone clearance (AGL) vs Barometer Home Altitude + active rangefinder mode
+  updateAltitudeSensors(p) {
+    const clearance = p.clearance || 0.48;
+    const surfY = this.sampleSurfaceBelowY(this.position.x, this.position.y, this.position.z);
+    const homeBaseY = (typeof this.getTerrainHeight === 'function' ? this.getTerrainHeight(0, 0) : 0) + clearance;
+    const aglRaw = Math.max(0, this.position.y - surfY - clearance);
+    const homeAltRaw = this.position.y - homeBaseY;
+
+    this.surfaceBelowY = surfY;
+    this.groundClearanceM = Number(aglRaw.toFixed(2));
+    this.homeAltitudeM = Number(homeAltRaw.toFixed(1));
+
+    if (p.hasLidar) {
+      this.altSensorType = 'RADAR+TOF';
+      this.altSensorLocked = aglRaw <= 35.0;
+    } else if (p.hasOpticalFlow) {
+      this.altSensorType = 'SONAR';
+      this.altSensorLocked = aglRaw <= 6.0;
+    } else if (p.hasBaro) {
+      this.altSensorType = 'BARO';
+      this.altSensorLocked = false;
+    } else {
+      this.altSensorType = 'NONE';
+      this.altSensorLocked = false;
+    }
+  }
+
+  // 360° LiDAR + mmWave Radar Proximity Scanner (14m Detection + 4.0m Active Repulsive Collision Braking!)
   computeLidarAvoidance() {
     let ax = 0, az = 0;
     let triggered = false;
+    let nearestDist = Infinity;
+    let nearestDx = 0, nearestDz = 0;
+    let nearestTag = '';
+    let nearestPtX = 0, nearestPtY = 0, nearestPtZ = 0;
+
     if (this.customMapRoot || !this.colliders || this.colliders.length === 0) {
-      return { ax, az, triggered };
+      this.lidarNearestDist = null;
+      this.lidarNearestDirTh = '';
+      this.lidarNearestTag = '';
+      this.lidarZone = 'clear';
+      return { ax, az, triggered, nearestDist: null, zone: 'clear' };
     }
-    const detectR = 4.0;
-    const h = 0.65;
+
+    const scanR = 14.0;   // 360° Radar + LiDAR early detection radius
+    const brakeR = 4.0;   // Active autonomous obstacle-avoidance braking radius
+    const h = 0.72;
     const px = this.position.x, py = this.position.y, pz = this.position.z;
     const vx = this.velocity.x, vz = this.velocity.z;
 
     for (let i = 0; i < this.colliders.length; i++) {
       const c = this.colliders[i];
       let nx = 0, nz = 0, dist = 999;
+      let hitX = px, hitY = py, hitZ = pz;
 
       if (c.type === 'box') {
         if (py + h < c.minY || py - h > c.maxY) continue;
@@ -10729,30 +11074,87 @@ class DroneFlightSimulator {
         const cz = Math.max(c.minZ, Math.min(c.maxZ, pz));
         const dx = px - cx, dz = pz - cz;
         dist = Math.hypot(dx, dz);
-        if (dist > 0.01 && dist < detectR) {
+        if (dist > 0.01 && dist < scanR) {
           nx = dx / dist;
           nz = dz / dist;
+          hitX = cx;
+          hitY = Math.max(c.minY, Math.min(c.maxY, py));
+          hitZ = cz;
         }
-      } else if (c.type === 'cyl' && c.radius >= 0.75) {
+      } else if (c.type === 'cyl' && (c.radius >= 0.75 || c.tag === 'power_pole')) {
         if (py + h < c.minY || py - h > c.maxY) continue;
         const dx = px - c.x, dz = pz - c.z;
         const centerDist = Math.hypot(dx, dz);
-        dist = centerDist - c.radius;
-        if (centerDist > 0.01 && dist > 0.01 && dist < detectR) {
+        dist = Math.max(0.02, centerDist - c.radius);
+        if (centerDist > 0.01 && dist < scanR) {
           nx = dx / centerDist;
           nz = dz / centerDist;
+          hitX = c.x + nx * c.radius;
+          hitY = Math.max(c.minY, Math.min(c.maxY, py));
+          hitZ = c.z + nz * c.radius;
         }
       }
 
-      if (dist < detectR && (nx !== 0 || nz !== 0)) {
-        // Only brake if actually moving toward this obstacle or very close (<1.6m)
-        const approach = -(vx * nx + vz * nz);
-        if (approach > 0.35 || dist < 1.6) {
-          const proximity = Math.max(0, 1 - dist / detectR);
-          const mag = proximity * (3.6 + Math.max(0, approach) * 1.35);
-          ax += nx * mag;
-          az += nz * mag;
-          triggered = true;
+      if (dist < scanR && (nx !== 0 || nz !== 0)) {
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestDx = -nx; // vector from drone -> obstacle
+          nearestDz = -nz;
+          nearestTag = c.tag || 'building';
+          nearestPtX = hitX;
+          nearestPtY = hitY;
+          nearestPtZ = hitZ;
+        }
+        // Active repulsive braking within 4.0m when approaching or very close (<1.6m)
+        if (dist < brakeR) {
+          const approach = -(vx * nx + vz * nz);
+          if (approach > 0.35 || dist < 1.6) {
+            const proximity = Math.max(0, 1 - dist / brakeR);
+            const mag = proximity * (3.6 + Math.max(0, approach) * 1.35);
+            ax += nx * mag;
+            az += nz * mag;
+            triggered = true;
+          }
+        }
+      }
+    }
+
+    // Also scan overhead electric power cable spans (สายไฟฟ้า) between utility poles!
+    if (this.powerWireSegments && this.powerWireSegments.length > 0) {
+      for (let i = 0; i < this.powerWireSegments.length; i++) {
+        const w = this.powerWireSegments[i];
+        const sdx = w.x2 - w.x1, sdz = w.z2 - w.z1;
+        const lenSq = sdx * sdx + sdz * sdz;
+        if (lenSq < 0.01) continue;
+        const t = Math.max(0, Math.min(1, ((px - w.x1) * sdx + (pz - w.z1) * sdz) / lenSq));
+        const wx = w.x1 + sdx * t;
+        const wz = w.z1 + sdz * t;
+        const wy = w.y1 + (w.y2 - w.y1) * t - Math.sin(t * Math.PI) * (w.sag || 0.65);
+        const dx = px - wx, dy = py - wy, dz = pz - wz;
+        const dist3d = Math.hypot(dx, dy, dz);
+        if (dist3d > 0.01 && dist3d < scanR && Math.abs(dy) < 2.2) {
+          const hDist = Math.hypot(dx, dz);
+          const nx = hDist > 0.01 ? dx / hDist : 0;
+          const nz = hDist > 0.01 ? dz / hDist : 0;
+          if (dist3d < nearestDist) {
+            nearestDist = dist3d;
+            nearestDx = -nx;
+            nearestDz = -nz;
+            nearestTag = 'power_wire';
+            nearestPtX = wx;
+            nearestPtY = wy;
+            nearestPtZ = wz;
+          }
+          if (dist3d < brakeR && hDist > 0.01) {
+            const approach = -(vx * nx + vz * nz);
+            if (approach > 0.30 || dist3d < 1.8) {
+              const proximity = Math.max(0, 1 - dist3d / brakeR);
+              const mag = proximity * (3.6 + Math.max(0, approach) * 1.35);
+              ax += nx * mag;
+              az += nz * mag;
+              triggered = true;
+            }
+          }
         }
       }
     }
@@ -10762,12 +11164,973 @@ class DroneFlightSimulator {
       ax = (ax / totalMag) * 6.5;
       az = (az / totalMag) * 6.5;
     }
-    return { ax, az, triggered };
+
+    if (nearestDist < scanR) {
+      this.lidarNearestDist = Number(nearestDist.toFixed(1));
+      if (this.lidarNearestPoint) this.lidarNearestPoint.set(nearestPtX, nearestPtY, nearestPtZ);
+      // Express obstacle direction in the drone's own body frame (หน้า/หลัง/ซ้าย/ขวา)
+      const yaw = (this.rotation && this.rotation.y) || 0;
+      const sinY = Math.sin(yaw);
+      const cosY = Math.cos(yaw);
+      const obsFwd = nearestDx * sinY + nearestDz * cosY;
+      const obsRight = -nearestDx * cosY + nearestDz * sinY;
+      const relDeg = (Math.atan2(obsRight, obsFwd) * (180 / Math.PI) + 360) % 360;
+      const dirLabels = ['หน้า', 'ขวาหน้า', 'ขวา', 'ขวาหลัง', 'หลัง', 'ซ้ายหลัง', 'ซ้าย', 'ซ้ายหน้า'];
+      this.lidarNearestDirTh = dirLabels[Math.round(relDeg / 45) % 8];
+      const tagMap = {
+        tree: 'ต้นไม้',
+        power_pole: 'เสาไฟฟ้า',
+        power_wire: 'สายไฟฟ้า',
+        hangar: 'โรงเก็บ',
+        atc_tower: 'หอบังคับการ',
+        telecom_5g: 'เสา 5G',
+        wind_turbine: 'กังหันลม',
+        solar_grid: 'สถานีไฟ',
+        building: 'อาคาร'
+      };
+      this.lidarNearestTag = tagMap[nearestTag] || 'สิ่งกีดขวาง';
+      this.lidarZone = (triggered || nearestDist < 4.0) ? 'brake' : (nearestDist <= 9.0 ? 'detect' : 'clear');
+    } else {
+      this.lidarNearestDist = null;
+      this.lidarNearestDirTh = '';
+      this.lidarNearestTag = '';
+      this.lidarZone = 'clear';
+    }
+
+    return { ax, az, triggered, nearestDist: this.lidarNearestDist, zone: this.lidarZone };
+  }
+
+  // Procedural 512x512 Glowing Red Circular Laser Grid Texture (projects onto ground when close to surface!)
+  createGroundLaserGridTexture() {
+    if (typeof document === 'undefined') return null;
+    const size = 512;
+    const can = document.createElement('canvas');
+    can.width = size;
+    can.height = size;
+    const ctx = can.getContext('2d');
+    const cx = size / 2;
+    const cy = size / 2;
+    const R = 224;
+
+    ctx.clearRect(0, 0, size, size);
+
+    // 1. Soft crimson radial ground illumination wash (matches realistic red downward structured-light glow!)
+    const wash = ctx.createRadialGradient(cx, cy, 12, cx, cy, R + 24);
+    wash.addColorStop(0.0, 'rgba(255, 22, 16, 0.34)');
+    wash.addColorStop(0.62, 'rgba(255, 18, 12, 0.22)');
+    wash.addColorStop(0.88, 'rgba(255, 14, 10, 0.14)');
+    wash.addColorStop(1.0, 'rgba(255, 0, 0, 0.0)');
+    ctx.fillStyle = wash;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Clipped crisp circular square-lattice laser grid (3-pass neon glow + bright hot core!)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+
+    const step = 36;
+    const drawLattice = (lineWidth, strokeStyle, blur) => {
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = strokeStyle;
+      ctx.shadowBlur = blur;
+      ctx.shadowColor = '#ff1808';
+      ctx.beginPath();
+      for (let offset = -R; offset <= R; offset += step) {
+        const x = cx + offset;
+        ctx.moveTo(x, cy - R);
+        ctx.lineTo(x, cy + R);
+        const y = cy + offset;
+        ctx.moveTo(cx - R, y);
+        ctx.lineTo(cx + R, y);
+      }
+      ctx.stroke();
+    };
+
+    drawLattice(11.0, 'rgba(255, 16, 10, 0.36)', 16);
+    drawLattice(4.4, 'rgba(255, 42, 24, 0.90)', 8);
+    drawLattice(1.7, 'rgba(255, 195, 175, 0.96)', 0);
+    ctx.restore();
+
+    // 3. Crisp glowing circular perimeter rim
+    const drawRim = (lineWidth, strokeStyle, blur) => {
+      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = strokeStyle;
+      ctx.shadowBlur = blur;
+      ctx.shadowColor = '#ff1808';
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.stroke();
+    };
+    drawRim(12.0, 'rgba(255, 18, 12, 0.42)', 18);
+    drawRim(4.6, 'rgba(255, 44, 24, 0.95)', 8);
+    drawRim(1.8, 'rgba(255, 200, 180, 0.98)', 0);
+
+    const tex = new THREE.CanvasTexture(can);
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // Lightweight 3D Sensor Visualizers:
+  // 1) Projected Red Circular Laser Grid on ground (visible ONLY when close to ground <= 4.5m!)
+  // 2) LiDAR Obstacle Laser Beam + Impact Dot (NO horizontal circle ring; beam shows ONLY near obstacles including electric poles!)
+  initSensorVisuals() {
+    if (this.sensorVisuals || !this.scene || typeof THREE === 'undefined') return;
+
+    // 1. Red Circular Laser Grid projected onto ground/roof surface when close to ground!
+    const gridTex = this.createGroundLaserGridTexture();
+    const gridGeo = new THREE.PlaneGeometry(2.6, 2.6);
+    gridGeo.rotateX(-Math.PI / 2);
+    const gridMat = new THREE.MeshBasicMaterial({
+      map: gridTex,
+      transparent: true,
+      opacity: 0.96,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      side: THREE.DoubleSide
+    });
+    const groundGrid = new THREE.Mesh(gridGeo, gridMat);
+    groundGrid.renderOrder = 3;
+    groundGrid.visible = false;
+
+    // 2. LiDAR Obstacle Lock-On Laser Beam (NO horizontal circle — ONLY shows crisp 3D laser line when close to obstacle!)
+    const beamGeo = new THREE.CylinderGeometry(0.020, 0.020, 1.0, 6, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xff2a1f,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false
+    });
+    const targetLine = new THREE.Mesh(beamGeo, beamMat);
+    targetLine.renderOrder = 4;
+    targetLine.visible = false;
+
+    // 3. Glowing Laser Impact Point Dot directly on the detected obstacle / electric pole!
+    const dotGeo = new THREE.SphereGeometry(0.085, 10, 8);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xff2a1f, transparent: true, opacity: 0.96, depthWrite: false });
+    const targetDot = new THREE.Mesh(dotGeo, dotMat);
+    targetDot.renderOrder = 5;
+    targetDot.visible = false;
+
+    this.scene.add(groundGrid, targetLine, targetDot);
+    this.sensorVisuals = {
+      groundGrid,
+      targetLine,
+      targetDot,
+      _start: new THREE.Vector3(),
+      _dir: new THREE.Vector3(),
+      _up: new THREE.Vector3(0, 1, 0)
+    };
+  }
+
+  updateSensorVisuals() {
+    if (!this.sensorVisuals) this.initSensorVisuals();
+    if (!this.sensorVisuals) return;
+    const p = this.physicsParams;
+    const sv = this.sensorVisuals;
+    if (!p || !this.droneMesh) {
+      sv.groundGrid.visible = false;
+      sv.targetLine.visible = false;
+      sv.targetDot.visible = false;
+      return;
+    }
+
+    const px = this.position.x;
+    const py = this.position.y;
+    const pz = this.position.z;
+    const agl = this.groundClearanceM || 0;
+
+    // 1. Projected Red Circular Laser Grid — visible ONLY when close to the ground/surface below (<= 4.5m AGL)!
+    const hasGroundSensor = Boolean(p.hasOpticalFlow || p.hasLidar);
+    const nearGroundMax = 4.5;
+    const showGroundGrid = hasGroundSensor && this.isArmed && agl <= nearGroundMax;
+    sv.groundGrid.visible = showGroundGrid;
+    if (showGroundGrid) {
+      const surfY = (this.surfaceBelowY ?? 0) + 0.055;
+      sv.groundGrid.position.set(px, surfY, pz);
+      sv.groundGrid.rotation.y = (this.rotation && this.rotation.y) || 0;
+
+      // Cone projection expands gently with height; vivid <= 3.1m (including 3.0m auto-takeoff!), fades smoothly out 3.1m -> 4.5m!
+      const coneScale = 0.92 + agl * 0.22;
+      sv.groundGrid.scale.set(coneScale, 1, coneScale);
+      const heightFade = agl <= 3.1 ? 1.0 : Math.max(0, 1.0 - (agl - 3.1) / (nearGroundMax - 3.1));
+      const pulse = 0.92 + 0.08 * Math.sin(performance.now() * 0.008);
+      sv.groundGrid.material.opacity = (this.isLanded ? 0.72 : 0.96) * heightFade * pulse;
+    }
+
+    // 2. LiDAR Obstacle Laser Line ONLY (no circle ring!) — appears ONLY when approaching obstacles/trees/electric poles (<= 9.0m)
+    const showTarget = Boolean(
+      p.hasLidar && !this.isLanded && this.isArmed &&
+      this.lidarNearestDist !== null && this.lidarNearestDist <= 9.0 && this.lidarNearestPoint
+    );
+    sv.targetLine.visible = showTarget;
+    sv.targetDot.visible = showTarget;
+    if (showTarget) {
+      sv._start.set(px, py + 0.14, pz);
+      sv._dir.subVectors(this.lidarNearestPoint, sv._start);
+      const beamLen = sv._dir.length();
+      if (beamLen > 0.05) {
+        sv.targetLine.position.lerpVectors(sv._start, this.lidarNearestPoint, 0.5);
+        sv._dir.multiplyScalar(1 / beamLen);
+        sv.targetLine.quaternion.setFromUnitVectors(sv._up, sv._dir);
+        const isBrake = this.lidarZone === 'brake';
+        const beamRadiusScale = isBrake ? 1.35 : 0.95;
+        sv.targetLine.scale.set(beamRadiusScale, beamLen, beamRadiusScale);
+
+        const laserHex = isBrake ? 0xff2a1f : 0xf59e0b;
+        sv.targetLine.material.color.setHex(laserHex);
+        sv.targetLine.material.opacity = isBrake ? 0.96 : 0.85;
+        sv.targetDot.material.color.setHex(laserHex);
+        sv.targetDot.position.copy(this.lidarNearestPoint);
+        const dotPulse = isBrake ? (1.15 + 0.35 * Math.abs(Math.sin(performance.now() * 0.016))) : 0.95;
+        sv.targetDot.scale.setScalar(dotPulse);
+      } else {
+        sv.targetLine.visible = false;
+      }
+    }
+  }
+
+  // =========================================================================
+  // AUTONOMOUS SENSOR/SIGNAL-LOSS RETURN PATH PLANNER (Breadcrumb Backtrack + 2D A* Obstacle Avoidance!)
+  // =========================================================================
+
+  recordFlightBreadcrumb() {
+    if (!this.isArmed || this.isLanded || this.isRTHMode || this.isCrashed) return;
+    if (!this.flightPathHistory) this.flightPathHistory = [];
+    const px = this.position.x, py = this.position.y, pz = this.position.z;
+    const last = this.flightPathHistory[this.flightPathHistory.length - 1];
+    if (!last || Math.hypot(px - last.x, py - last.y, pz - last.z) >= 3.5) {
+      this.flightPathHistory.push({ x: px, y: py, z: pz });
+      if (this.flightPathHistory.length > 140) {
+        // Keep index 0 (Home start) and compact oldest breadcrumb cleanly
+        this.flightPathHistory.splice(1, 1);
+      }
+    }
+  }
+
+  // Check whether horizontal point (wx, wz) at altitude flyY collides with any tall obstacle
+  isReturnPointBlocked(wx, wz, flyY, pad = 4.4) {
+    if (this.customMapRoot || !this.colliders || this.colliders.length === 0) return false;
+    if (Math.hypot(wx, wz) > 286) return true;
+    for (let i = 0; i < this.colliders.length; i++) {
+      const c = this.colliders[i];
+      if (c.type === 'box') {
+        if (flyY - 1.4 > c.maxY || flyY + 1.2 < c.minY) continue;
+        if (wx >= c.minX - pad && wx <= c.maxX + pad && wz >= c.minZ - pad && wz <= c.maxZ + pad) {
+          return true;
+        }
+      } else if (c.type === 'cyl' && (c.radius >= 0.75 || c.tag === 'power_pole')) {
+        if (flyY - 1.4 > c.maxY || flyY + 1.2 < c.minY) continue;
+        if (Math.hypot(wx - c.x, wz - c.z) < c.radius + pad) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Verify straight corridor from (x1, z1) -> (x2, z2) at altitude flyY is obstacle-free (for LOS string-pulling!)
+  hasClearReturnCorridor(x1, z1, x2, z2, flyY, pad = 4.2) {
+    const dist = Math.hypot(x2 - x1, z2 - z1);
+    const steps = Math.max(2, Math.ceil(dist / 3.0));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const sx = x1 + (x2 - x1) * t;
+      const sz = z1 + (z2 - z1) * t;
+      if (this.isReturnPointBlocked(sx, sz, flyY, pad)) return false;
+    }
+    return true;
+  }
+
+  // Fast bounded 2D Grid A* Pathfinding from (startX, startZ) -> Home (0, 0) avoiding all tall obstacles at cruiseY!
+  runAStarReturnGrid(startX, startZ, cruiseY) {
+    const cell = 8.0;
+    const toCell = (v) => Math.round(v / cell);
+    const sGx = toCell(startX), sGz = toCell(startZ);
+    const gGx = 0, gGz = 0;
+
+    if (sGx === gGx && sGz === gGz) {
+      return [{ x: 0, z: 0 }];
+    }
+    if (this.hasClearReturnCorridor(startX, startZ, 0, 0, cruiseY, 4.4)) {
+      return [{ x: 0, z: 0 }];
+    }
+
+    const keyOf = (gx, gz) => `${gx},${gz}`;
+    const startKey = keyOf(sGx, sGz);
+    const goalKey = keyOf(gGx, gGz);
+
+    const open = [{ gx: sGx, gz: sGz, key: startKey, g: 0, f: Math.hypot(sGx - gGx, sGz - gGz) }];
+    const gScore = new Map([[startKey, 0]]);
+    const cameFrom = new Map();
+    const closed = new Set();
+    const blockedCache = new Map();
+
+    const checkBlocked = (gx, gz) => {
+      if (gx === gGx && gz === gGz) return false;
+      if (gx === sGx && gz === sGz) return false;
+      const k = keyOf(gx, gz);
+      if (blockedCache.has(k)) return blockedCache.get(k);
+      const b = this.isReturnPointBlocked(gx * cell, gz * cell, cruiseY, 4.4);
+      blockedCache.set(k, b);
+      return b;
+    };
+
+    const dirs = [
+      [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+      [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414]
+    ];
+
+    let found = false;
+    let bestFallbackKey = startKey;
+    let bestFallbackH = Math.hypot(sGx, sGz);
+    let iterations = 0;
+
+    while (open.length > 0 && iterations < 1200) {
+      iterations++;
+      let bestIdx = 0;
+      for (let i = 1; i < open.length; i++) {
+        if (open[i].f < open[bestIdx].f) bestIdx = i;
+      }
+      const cur = open.splice(bestIdx, 1)[0];
+      if (closed.has(cur.key)) continue;
+      closed.add(cur.key);
+
+      if (cur.key === goalKey) {
+        found = true;
+        break;
+      }
+
+      const hCur = Math.hypot(cur.gx - gGx, cur.gz - gGz);
+      if (hCur < bestFallbackH) {
+        bestFallbackH = hCur;
+        bestFallbackKey = cur.key;
+      }
+
+      for (let d = 0; d < dirs.length; d++) {
+        const nx = cur.gx + dirs[d][0];
+        const nz = cur.gz + dirs[d][1];
+        if (Math.abs(nx) > 36 || Math.abs(nz) > 36) continue;
+        const nKey = keyOf(nx, nz);
+        if (closed.has(nKey)) continue;
+        if (checkBlocked(nx, nz)) continue;
+
+        const tentG = cur.g + dirs[d][2];
+        const prevG = gScore.has(nKey) ? gScore.get(nKey) : Infinity;
+        if (tentG < prevG) {
+          gScore.set(nKey, tentG);
+          cameFrom.set(nKey, cur.key);
+          const h = Math.hypot(nx - gGx, nz - gGz);
+          open.push({ gx: nx, gz: nz, key: nKey, g: tentG, f: tentG + h * 1.08 });
+        }
+      }
+    }
+
+    // Reconstruct raw grid path
+    const rawPts = [];
+    let traceKey = found ? goalKey : bestFallbackKey;
+    while (traceKey && traceKey !== startKey) {
+      const [gx, gz] = traceKey.split(',').map(Number);
+      rawPts.push({ x: gx * cell, z: gz * cell });
+      traceKey = cameFrom.get(traceKey);
+    }
+    rawPts.reverse();
+    if (rawPts.length === 0 || Math.hypot(rawPts[rawPts.length - 1].x, rawPts[rawPts.length - 1].z) > 2) {
+      rawPts.push({ x: 0, z: 0 });
+    }
+
+    // Line-of-Sight String-Pulling Smoothing (produces sleek minimal waypoints around obstacles!)
+    const smoothed = [];
+    let anchorX = startX, anchorZ = startZ;
+    let idx = 0;
+    while (idx < rawPts.length) {
+      let farthest = idx;
+      for (let j = rawPts.length - 1; j > idx; j--) {
+        if (this.hasClearReturnCorridor(anchorX, anchorZ, rawPts[j].x, rawPts[j].z, cruiseY, 4.2)) {
+          farthest = j;
+          break;
+        }
+      }
+      smoothed.push(rawPts[farthest]);
+      anchorX = rawPts[farthest].x;
+      anchorZ = rawPts[farthest].z;
+      idx = farthest + 1;
+    }
+    return smoothed;
+  }
+
+  // Hybrid Autonomous Return Path Planner: Combines IMU Breadcrumb Escape + Obstacle-Aware 2D/3D A* Pathfinding!
+  computeSmartReturnPath(preferBacktrack = false) {
+    const p = this.physicsParams || this.computeDronePhysicsParams();
+    const clearance = p.clearance || 0.48;
+    const px = this.position.x, py = this.position.y, pz = this.position.z;
+    const homeGroundY = (typeof this.getTerrainHeight === 'function') ? this.getTerrainHeight(0, 0) : 0;
+    const homePadY = homeGroundY + clearance;
+    const distHome = Math.hypot(px, pz);
+
+    const waypoints = [];
+    let usedBacktrack = false;
+    let usedAStar = false;
+
+    const isInsideHangar = (x, z, y) => (x >= 56.5 && x <= 75.5 && z >= -24.8 && z <= 0.8 && y <= 9.2);
+
+    // Stage 1: Safe Exit / Odometry Breadcrumb Backtracking (essential inside Steel Hangar OR when GPS/Sensor is lost!)
+    let planStartX = px;
+    let planStartY = py;
+    let planStartZ = pz;
+
+    const hist = this.flightPathHistory || [];
+    const needIndoorEscape = this.insideMetalRoof || isInsideHangar(px, pz, py);
+    const fullBacktrackMode = Boolean(preferBacktrack && (!p.hasGps || this.sensorLostSim) && hist.length >= 2);
+
+    if (needIndoorEscape) {
+      usedBacktrack = true;
+      // Walk backward through recorded flight breadcrumbs until exiting hangar roof safely!
+      let escaped = false;
+      for (let i = hist.length - 1; i >= 0; i--) {
+        const bp = hist[i];
+        if (!isInsideHangar(bp.x, bp.z, bp.y)) {
+          waypoints.push({ x: bp.x, y: Math.min(4.2, Math.max(2.6, bp.y)), z: bp.z, kind: 'backtrack' });
+          planStartX = bp.x;
+          planStartY = Math.min(4.2, Math.max(2.6, bp.y));
+          planStartZ = bp.z;
+          escaped = true;
+          break;
+        } else if (waypoints.length === 0 || Math.hypot(bp.x - waypoints[waypoints.length - 1].x, bp.z - waypoints[waypoints.length - 1].z) >= 5.0) {
+          waypoints.push({ x: bp.x, y: Math.min(4.0, Math.max(2.4, py)), z: bp.z, kind: 'backtrack' });
+        }
+      }
+      if (!escaped) {
+        // Direct safe exit out the open West hangar doorway (x=50, z=-12)
+        waypoints.push({ x: 50.0, y: Math.min(4.0, Math.max(2.5, py)), z: -12.0, kind: 'backtrack' });
+        planStartX = 50.0;
+        planStartY = Math.min(4.0, Math.max(2.5, py));
+        planStartZ = -12.0;
+      }
+    } else if (fullBacktrackMode && distHome > 6.0) {
+      // Sensor/GPS Lost mid-flight: retrace recent IMU odometry trail for safe immediate escape, then bridge via A* to Home!
+      usedBacktrack = true;
+      let lastAdded = { x: px, y: py, z: pz };
+      const maxBackPts = Math.min(5, hist.length);
+      let added = 0;
+      for (let i = hist.length - 1; i >= 0 && added < maxBackPts; i--) {
+        const bp = hist[i];
+        const stepDist = Math.hypot(bp.x - lastAdded.x, bp.z - lastAdded.z);
+        if (stepDist >= 7.5 || i === 0) {
+          const safeY = Math.max(this.getTerrainHeight(bp.x, bp.z) + 3.5, bp.y);
+          waypoints.push({ x: bp.x, y: safeY, z: bp.z, kind: 'backtrack' });
+          lastAdded = { x: bp.x, y: safeY, z: bp.z };
+          planStartX = bp.x;
+          planStartY = safeY;
+          planStartZ = bp.z;
+          added++;
+          if (Math.hypot(bp.x, bp.z) < 6.0) break;
+        }
+      }
+    }
+
+    // Stage 2: Obstacle-Aware 2D/3D A* Pathfinding from escape point to Home Helipad (0, 0)
+    const remDist = Math.hypot(planStartX, planStartZ);
+    const maxSafeCruiseY = homePadY + Math.max(8.0, (p.maxAltitudeLimitM || 90) - 3.0);
+    const cruiseY = Math.min(maxSafeCruiseY, Math.max(12.5, Math.min(22.0, Math.max(planStartY + 2.5, homePadY + 12.5))));
+    this.rthCruiseAlt = cruiseY;
+
+    if (remDist > 4.0) {
+      // Climb clear of low obstacles before horizontal transit (unless already high enough)
+      if (planStartY < cruiseY - 1.5 && !isInsideHangar(planStartX, planStartZ, planStartY)) {
+        waypoints.push({ x: planStartX, y: cruiseY, z: planStartZ, kind: 'climb' });
+      }
+      const gridPts = this.runAStarReturnGrid(planStartX, planStartZ, cruiseY);
+      usedAStar = true;
+      for (let i = 0; i < gridPts.length; i++) {
+        const gp = gridPts[i];
+        const minSafeY = ((typeof this.getTerrainHeight === 'function') ? this.getTerrainHeight(gp.x, gp.z) : 0) + 4.5;
+        const isLast = i === gridPts.length - 1;
+        waypoints.push({
+          x: gp.x,
+          y: isLast ? Math.max(homePadY + 6.0, Math.min(cruiseY, homePadY + 13.0)) : Math.max(cruiseY, minSafeY),
+          z: gp.z,
+          kind: isLast ? 'home' : 'astar'
+        });
+      }
+    } else {
+      waypoints.push({ x: 0, y: Math.max(homePadY + 4.0, Math.min(py, homePadY + 12.0)), z: 0, kind: 'home' });
+    }
+
+    // Compute total 3D planned route length
+    let totalDist = 0;
+    let prevX = px, prevY = py, prevZ = pz;
+    for (let i = 0; i < waypoints.length; i++) {
+      const w = waypoints[i];
+      totalDist += Math.hypot(w.x - prevX, w.y - prevY, w.z - prevZ);
+      prevX = w.x; prevY = w.y; prevZ = w.z;
+    }
+
+    this.rthWaypoints = waypoints;
+    this.rthWaypointIdx = 0;
+    this.rthTotalPathDist = Math.round(totalDist);
+    this.rthAlgoLabel = (usedBacktrack && usedAStar)
+      ? 'Breadcrumb ย้อนรอย + A* หลบสิ่งกีดขวาง'
+      : usedBacktrack
+        ? 'IMU Breadcrumb ย้อนรอยจุดเริ่มต้น'
+        : 'A* คำนวณเส้นทางหลบสิ่งกีดขวาง';
+    return waypoints;
+  }
+
+  triggerSmartAutoReturn(reason = 'สัญญาณขาดหาย', isFailsafe = true, simulateLoss = false) {
+    this.initAudio();
+    this.isRTHMode = true;
+    this.isHoldMode = true;
+    this.isFailsafeReturn = Boolean(isFailsafe);
+    this.sensorLostSim = Boolean(simulateLoss);
+    this.signalLossTimer = 0;
+    this.rthPhase = 'PATH_RETURN';
+
+    const pts = this.computeSmartReturnPath(Boolean(isFailsafe || simulateLoss));
+    this.playMelody(
+      isFailsafe
+        ? [[980, 0.00, 0.07], [740, 0.09, 0.07], [980, 0.18, 0.12]]
+        : [[660, 0.00, 0.07], [880, 0.09, 0.11]]
+    );
+    this.setHudAlert(
+      `🧭 ${reason} — คำนวณเส้นทางกลับจุดเริ่มต้นอัตโนมัติ (${pts.length} จุด · ${this.rthTotalPathDist} ม. · ${this.rthAlgoLabel})`,
+      4600
+    );
+    return pts;
+  }
+
+  cancelSmartAutoReturn(msg = 'ยกเลิกเส้นทางกลับอัตโนมัติ — นักบินรับช่วงควบคุม') {
+    this.isRTHMode = false;
+    this.rthPhase = 'IDLE';
+    this.isFailsafeReturn = false;
+    this.sensorLostSim = false;
+    this.signalLossTimer = 0;
+    this.rthWaypoints = [];
+    this.rthWaypointIdx = 0;
+    this.holdAltitude = this.position.y;
+    this.holdTargetPos.copy(this.position);
+    this.holdTargetLocked = false;
+    this.clearRthPathVisuals();
+    this.playTone(520, 0.12);
+    this.setHudAlert(msg, 2400);
+  }
+
+  // Interactive Demo Button (KeyP / #btn-hud-failsafe): Simulates sudden Sensor/Signal Loss mid-flight -> Auto-Path Return!
+  toggleSimulatedSensorLoss() {
+    this.initAudio();
+    if (this.sensorLostSim || (this.isRTHMode && this.isFailsafeReturn)) {
+      this.cancelSmartAutoReturn('📡 กู้คืนสัญญาณและเซนเซอร์สำเร็จ — นักบินกลับมาควบคุมปกติ');
+      return false;
+    }
+    if (!this.isArmed || this.isLanded) {
+      this.playTone(260, 0.14);
+      this.setHudAlert('บินขึ้นจากพื้นก่อนเพื่อทดสอบจำลองเซนเซอร์/สัญญาณหายกลางทาง (กด T บินขึ้น)', 2800);
+      return false;
+    }
+    this.triggerSmartAutoReturn('จำลองเซนเซอร์/สัญญาณหายกลางทาง!', true, true);
+    return true;
+  }
+
+  // 3D Glowing Calculated Auto-Return Path Polyline + Waypoint Beacons + Home Pad Landing Beam!
+  initRthPathVisuals() {
+    if (this.rthPathVisuals || !this.scene || typeof THREE === 'undefined') return;
+    const maxPts = 24;
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(maxPts * 3), 3));
+    lineGeo.setDrawRange(0, 0);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.92, depthWrite: false });
+    const pathLine = new THREE.Line(lineGeo, lineMat);
+    pathLine.frustumCulled = false;
+    pathLine.visible = false;
+
+    const markers = [];
+    const sphereGeo = new THREE.SphereGeometry(0.42, 12, 10);
+    for (let i = 0; i < 16; i++) {
+      const m = new THREE.Mesh(
+        sphereGeo,
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.82, depthWrite: false })
+      );
+      m.visible = false;
+      this.scene.add(m);
+      markers.push(m);
+    }
+
+    // Translucent Home Helipad Landing Beacon Column at (0, 0)
+    const homeBeamGeo = new THREE.CylinderGeometry(0.32, 0.72, 24, 16, 1, true);
+    const homeBeamMat = new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.24, side: THREE.DoubleSide, depthWrite: false });
+    const homeBeam = new THREE.Mesh(homeBeamGeo, homeBeamMat);
+    homeBeam.position.set(0, 12, 0);
+    homeBeam.visible = false;
+
+    this.scene.add(pathLine, homeBeam);
+    this.rthPathVisuals = { pathLine, markers, homeBeam, maxPts };
+  }
+
+  clearRthPathVisuals() {
+    if (!this.rthPathVisuals) return;
+    this.rthPathVisuals.pathLine.visible = false;
+    this.rthPathVisuals.homeBeam.visible = false;
+    for (let i = 0; i < this.rthPathVisuals.markers.length; i++) {
+      this.rthPathVisuals.markers[i].visible = false;
+    }
+  }
+
+  updateRthPathVisuals() {
+    if (!this.isRTHMode || !this.rthWaypoints || this.rthWaypoints.length === 0) {
+      if (this.rthPathVisuals) this.clearRthPathVisuals();
+      return;
+    }
+    if (!this.rthPathVisuals) this.initRthPathVisuals();
+    if (!this.rthPathVisuals) return;
+
+    const rv = this.rthPathVisuals;
+    const isFail = Boolean(this.isFailsafeReturn || this.sensorLostSim);
+    rv.pathLine.material.color.setHex(isFail ? 0xff6a00 : 0x38bdf8);
+
+    const posArr = rv.pathLine.geometry.attributes.position.array;
+    let count = 0;
+    const pushPt = (x, y, z) => {
+      if (count >= rv.maxPts) return;
+      posArr[count * 3] = x;
+      posArr[count * 3 + 1] = y;
+      posArr[count * 3 + 2] = z;
+      count++;
+    };
+
+    // Start polyline from drone's live position -> all remaining waypoints -> Home Helipad (0, homeY, 0)
+    pushPt(this.position.x, this.position.y, this.position.z);
+    let mIdx = 0;
+    const pulse = 1.0 + 0.18 * Math.sin(performance.now() * 0.008);
+    for (let i = this.rthWaypointIdx; i < this.rthWaypoints.length; i++) {
+      const wp = this.rthWaypoints[i];
+      pushPt(wp.x, wp.y, wp.z);
+      if (mIdx < rv.markers.length) {
+        const mk = rv.markers[mIdx++];
+        mk.visible = true;
+        mk.position.set(wp.x, wp.y, wp.z);
+        mk.scale.setScalar(i === this.rthWaypointIdx ? pulse * 1.25 : 0.85);
+        mk.material.color.setHex(
+          wp.kind === 'home' ? 0x22c55e : wp.kind === 'backtrack' ? 0xf59e0b : (isFail ? 0xff6a00 : 0x38bdf8)
+        );
+      }
+    }
+    const homeY = ((typeof this.getTerrainHeight === 'function') ? this.getTerrainHeight(0, 0) : 0) + 0.35;
+    pushPt(0, homeY, 0);
+
+    for (let i = mIdx; i < rv.markers.length; i++) {
+      rv.markers[i].visible = false;
+    }
+
+    rv.pathLine.geometry.setDrawRange(0, count);
+    rv.pathLine.geometry.attributes.position.needsUpdate = true;
+    rv.pathLine.visible = count >= 2;
+    rv.homeBeam.visible = true;
+    rv.homeBeam.position.set(0, homeY + 12, 0);
+  }
+
+  // Real-World RF Signal Obstruction, Foliage Attenuation, Steel Faraday Cage, NLOS Shadowing & EMI Simulator!
+  evaluateSignalEnvironment(p, delta = 0.016) {
+    const px = this.position.x;
+    const py = this.position.y;
+    const pz = this.position.z;
+    const pilotY = this.getTerrainHeight(0, 0) + 1.8;
+
+    const distFromHome = Math.hypot(px, pz);
+    const rxRangeFrac = distFromHome / Math.max(90, p.rxRangeMeters || 340);
+    const distAtten = Math.max(0, Math.min(0.96, (rxRangeFrac - 0.14) * 0.86));
+
+    // Hardware-authentic RF penetration & EMI immunity by installed RX receiver!
+    const rxType = p.rxType || 'elrs';
+    const rxPenFactor = rxType === '24g' ? 1.24 : rxType === 'dual' ? 0.62 : 0.88;
+    const emiFactor = rxType === '24g' ? 1.28 : rxType === 'dual' ? 0.45 : 0.85;
+
+    let treeAtten = 0;
+    let hangarAtten = 0;
+    let buildingAtten = 0;
+    let emi5gAtten = 0;
+    let emiRadarAtten = 0;
+    let terrainAtten = 0;
+    let insideMetalRoof = false;
+
+    if (!this.customMapRoot && this.colliders && this.colliders.length > 0) {
+      const dxRay = px;
+      const dyRay = py - pilotY;
+      const dzRay = pz;
+      const rayHorizSq = dxRay * dxRay + dzRay * dzRay;
+
+      // Helper: fast 3D ray-vs-AABB slab test along Pilot(0, pilotY, 0) -> Drone(px, py, pz)
+      const rayHitsBox = (c) => {
+        let tMin = 0.03;
+        let tMax = 0.985;
+        if (Math.abs(dxRay) < 1e-6) {
+          if (0 < c.minX || 0 > c.maxX) return false;
+        } else {
+          const inv = 1 / dxRay;
+          let t1 = c.minX * inv;
+          let t2 = c.maxX * inv;
+          if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+          if (t1 > tMin) tMin = t1;
+          if (t2 < tMax) tMax = t2;
+          if (tMin > tMax) return false;
+        }
+        if (Math.abs(dyRay) < 1e-6) {
+          if (pilotY < c.minY || pilotY > c.maxY) return false;
+        } else {
+          const inv = 1 / dyRay;
+          let t1 = (c.minY - pilotY) * inv;
+          let t2 = (c.maxY - pilotY) * inv;
+          if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+          if (t1 > tMin) tMin = t1;
+          if (t2 < tMax) tMax = t2;
+          if (tMin > tMax) return false;
+        }
+        if (Math.abs(dzRay) < 1e-6) {
+          if (0 < c.minZ || 0 > c.maxZ) return false;
+        } else {
+          const inv = 1 / dzRay;
+          let t1 = c.minZ * inv;
+          let t2 = c.maxZ * inv;
+          if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+          if (t1 > tMin) tMin = t1;
+          if (t2 < tMax) tMax = t2;
+          if (tMin > tMax) return false;
+        }
+        return tMax >= tMin;
+      };
+
+      for (let i = 0; i < this.colliders.length; i++) {
+        const c = this.colliders[i];
+        const tag = c.tag || 'building';
+
+        if (c.type === 'cyl') {
+          if (tag === 'tree') {
+            // 1. Proximity / Under-Canopy Foliage Attenuation (water in leaves absorbs 2.4GHz / RF strongly!)
+            if (py <= c.maxY + 2.5) {
+              const dEdge = Math.hypot(px - c.x, pz - c.z) - c.radius;
+              if (dEdge < 5.2) {
+                const prox = Math.max(0, 1 - Math.max(0, dEdge) / 5.2);
+                const canopyBoost = (dEdge < 1.8 && py <= c.maxY + 0.9) ? 0.22 * prox : 0;
+                treeAtten += 0.42 * prox + canopyBoost;
+              }
+            }
+            // 2. NLOS Ray passing through tree foliage between pilot & drone
+            if (rayHorizSq > 25) {
+              const t = (c.x * dxRay + c.z * dzRay) / rayHorizSq;
+              if (t > 0.04 && t < 0.98) {
+                const qx = t * dxRay;
+                const qz = t * dzRay;
+                const qy = pilotY + t * dyRay;
+                const rRf = c.radius * 1.32;
+                const dh = Math.hypot(c.x - qx, c.z - qz);
+                if (dh < rRf && qy >= c.minY - 0.5 && qy <= c.maxY + 0.8) {
+                  const depth = 1 - dh / rRf;
+                  treeAtten += 0.16 * (0.4 + 0.6 * depth);
+                }
+              }
+            }
+          } else if (tag === 'atc_tower' || tag === 'building' || tag === 'wind_turbine') {
+            // Solid concrete/steel cylinder NLOS shadowing + close multipath
+            if (py <= c.maxY + 1.5) {
+              const dEdge = Math.hypot(px - c.x, pz - c.z) - c.radius;
+              if (dEdge < 3.4) {
+                buildingAtten += 0.28 * (1 - Math.max(0, dEdge) / 3.4);
+              }
+            }
+            if (rayHorizSq > 25) {
+              const t = (c.x * dxRay + c.z * dzRay) / rayHorizSq;
+              if (t > 0.04 && t < 0.98) {
+                const qx = t * dxRay;
+                const qz = t * dzRay;
+                const qy = pilotY + t * dyRay;
+                const rRf = c.radius * 1.08;
+                const dh = Math.hypot(c.x - qx, c.z - qz);
+                if (dh < rRf && qy >= c.minY - 0.5 && qy <= c.maxY + 0.8) {
+                  buildingAtten += 0.44;
+                }
+              }
+            }
+          }
+        } else if (c.type === 'box') {
+          // Box structures (Metal Hangar, Houses, Barns, Ruins, Bridges)
+          const cx = Math.max(c.minX, Math.min(c.maxX, px));
+          const cy = Math.max(c.minY, Math.min(c.maxY, py));
+          const cz = Math.max(c.minZ, Math.min(c.maxZ, pz));
+          const dBox = Math.hypot(px - cx, py - cy, pz - cz);
+
+          if (tag === 'hangar') {
+            if (dBox < 4.0) {
+              hangarAtten = Math.max(hangarAtten, 0.46 * (1 - dBox / 4.0));
+            }
+            if (rayHorizSq > 25 && rayHitsBox(c)) {
+              hangarAtten += 0.52;
+            }
+          } else {
+            if (dBox < 3.4 && py <= c.maxY + 1.2) {
+              buildingAtten += 0.28 * (1 - dBox / 3.4);
+            }
+            if (rayHorizSq > 25 && rayHitsBox(c)) {
+              buildingAtten += 0.44;
+            }
+          }
+        }
+      }
+
+      // 3. Steel Airfield Hangar Faraday-Cage Bay (x: 57.5..74.8, z: -24.2..0.2, y < 8.8)
+      if (px >= 57.5 && px <= 74.8 && pz >= -24.2 && pz <= 0.2 && py <= 8.8) {
+        insideMetalRoof = true;
+        hangarAtten = Math.max(hangarAtten, 0.84);
+      } else if (px >= 53.5 && px <= 79.0 && pz >= -27.5 && pz <= 3.0 && py <= 10.2) {
+        const edgeX = Math.max(0, 57.5 - px, px - 74.8);
+        const edgeZ = Math.max(0, -24.2 - pz, pz - 0.2);
+        const dBay = Math.hypot(edgeX, edgeZ);
+        hangarAtten = Math.max(hangarAtten, Math.max(0, 1 - dBay / 4.5) * 0.56);
+      }
+
+      // 4. High-Power RF / Electromagnetic Interference (EMI) Zones
+      // 4a. 45m 5G Telecom Tower at (75, -70)
+      const d5g = Math.hypot(px - 75, pz + 70);
+      if (d5g < 22 && py >= 2 && py <= 56) {
+        const heightGain = py > 24 ? 0.82 : 0.62;
+        emi5gAtten = Math.max(emi5gAtten, (1 - d5g / 22) * heightGain);
+      }
+      // 4b. Solar Farm Inverters (172, 118) & Grid Control Substation (134, 124)
+      const dSolar = Math.hypot(px - 172, pz - 118);
+      if (dSolar < 20 && py < 14) {
+        emi5gAtten = Math.max(emi5gAtten, (1 - dSolar / 20) * 0.48);
+      }
+      const dGrid = Math.hypot(px - 134.2, pz - 124.1);
+      if (dGrid < 11 && py < 11) {
+        emi5gAtten = Math.max(emi5gAtten, (1 - dGrid / 11) * 0.46);
+      }
+      // 4c. ATC Control Tower Rotating Radar Dish at (-16, -34, y: 12..31)
+      const dAtc = Math.hypot(px + 16, pz + 34);
+      if (dAtc < 15 && py >= 12 && py <= 31) {
+        emiRadarAtten = (1 - dAtc / 15) * 0.64;
+      }
+
+      // 5. Terrain / Hill Fresnel-Zone NLOS Shadowing (sample 6 points along Pilot -> Drone ray)
+      if (distFromHome > 26) {
+        for (let k = 1; k <= 6; k++) {
+          const t = k / 7;
+          const sx = px * t;
+          const sz = pz * t;
+          const sy = pilotY + (py - pilotY) * t;
+          const terrainY = this.getTerrainHeight(sx, sz);
+          if (terrainY > sy + 0.75) {
+            terrainAtten += Math.min(0.32, (terrainY - sy) * 0.08);
+          }
+        }
+      }
+    }
+
+    const effTree = Math.min(0.84, Math.min(0.86, treeAtten) * rxPenFactor);
+    const effHangar = Math.min(0.90, Math.min(0.88, hangarAtten) * Math.max(0.84, rxPenFactor));
+    const effBuild = Math.min(0.82, Math.min(0.80, buildingAtten) * rxPenFactor);
+    const effEmi5g = Math.min(0.82, emi5gAtten * emiFactor);
+    const effEmiRadar = Math.min(0.72, emiRadarAtten * emiFactor);
+    const effTerrain = Math.min(0.84, Math.min(0.78, terrainAtten) * Math.max(0.85, rxPenFactor));
+
+    const envObstruction = 1 - (
+      (1 - effTree) *
+      (1 - effHangar) *
+      (1 - effBuild) *
+      (1 - effEmi5g) *
+      (1 - effEmiRadar) *
+      (1 - effTerrain)
+    );
+
+    // Determine dominant RF obstruction source for clear Thai HUD explanation
+    const candidates = [
+      { key: 'hangar', val: effHangar },
+      { key: 'tree', val: effTree },
+      { key: 'emi_5g', val: effEmi5g },
+      { key: 'emi_radar', val: effEmiRadar },
+      { key: 'building', val: effBuild },
+      { key: 'terrain', val: effTerrain }
+    ];
+    let topSource = 'clear';
+    let topVal = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      if (candidates[i].val > topVal) {
+        topVal = candidates[i].val;
+        topSource = candidates[i].key;
+      }
+    }
+    if (topVal < 0.20) {
+      topSource = distAtten >= 0.45 ? 'range' : 'clear';
+    }
+
+    const jitter = envObstruction > 0.14
+      ? envObstruction * 0.028 * (Math.sin(this.simTime * 11.3) + 0.6 * Math.cos(this.simTime * 19.7))
+      : 0;
+    const baseSignal = Math.max(0, 1.0 - distAtten) * (1.0 - envObstruction * 0.86);
+    const targetRssi = Math.max(4, Math.min(100, (baseSignal + jitter) * 100));
+
+    const dtClamp = Math.min(0.05, Math.max(0.001, delta));
+    const rssiAlpha = 1 - Math.exp(-5.5 * dtClamp);
+    const obsAlpha = 1 - Math.exp(-5.0 * dtClamp);
+    this.smoothedRssi = (this.smoothedRssi ?? 100) + (targetRssi - (this.smoothedRssi ?? 100)) * rssiAlpha;
+    this.signalObstruction = (this.signalObstruction || 0) + (envObstruction - (this.signalObstruction || 0)) * obsAlpha;
+    this.rssiPercent = Math.round(Math.max(0, Math.min(100, this.smoothedRssi)));
+    this.signalSource = topSource;
+    this.insideMetalRoof = insideMetalRoof;
+    this.gpsMultipathFactor = 1.0 + this.signalObstruction * (insideMetalRoof ? 3.5 : 2.2);
+
+    // Real-World Wind Shelter / Leeward Wake (calmer inside metal hangar or tucked behind trees/buildings!)
+    let targetShelter = 1.0;
+    if (insideMetalRoof) {
+      targetShelter = 0.15; // 85% calmer indoors inside the hangar bay!
+    } else {
+      const shelterDrag = Math.min(0.45, Math.min(0.32, treeAtten * 0.42) + Math.min(0.30, buildingAtten * 0.38) + Math.min(0.34, hangarAtten * 0.45));
+      targetShelter = Math.max(0.52, 1.0 - shelterDrag);
+    }
+    this.windShelterFactor = (this.windShelterFactor ?? 1.0) + (targetShelter - (this.windShelterFactor ?? 1.0)) * (1 - Math.exp(-3.5 * dtClamp));
+
+    if (this.sensorLostSim) {
+      this.rssiPercent = 0;
+      this.signalState = 'critical';
+      this.signalSource = 'sensor_lost';
+      this.signalObstruction = 1.0;
+      this.gpsMultipathFactor = 3.5;
+      this._lastSignalState = 'critical';
+      return { distFromHome, rxRangeFrac, envObstruction: 1.0, insideMetalRoof };
+    }
+
+    // Hysteresis prevents rapid blinking right on the threshold edge
+    const prevState = this.signalState || 'good';
+    let nextState = 'good';
+    if (this.rssiPercent <= 34 || this.signalObstruction >= 0.56 || (prevState === 'critical' && (this.rssiPercent <= 38 || this.signalObstruction >= 0.50))) {
+      nextState = 'critical';
+    } else if (this.rssiPercent <= 64 || this.signalObstruction >= 0.25 || (prevState === 'weak' && (this.rssiPercent <= 68 || this.signalObstruction >= 0.20))) {
+      nextState = 'weak';
+    }
+    this.signalState = nextState;
+
+    // Subtle telemetry warning chirp on entering weak/critical RF dead zones while armed
+    if (this.isArmed && !this.isCrashed) {
+      const nowMs = performance.now();
+      if (nextState === 'critical' && (prevState !== 'critical' || nowMs - (this._lastSignalBeepMs || 0) > 3600)) {
+        this._lastSignalBeepMs = nowMs;
+        this.playMelody([[940, 0.00, 0.05], [700, 0.07, 0.05], [940, 0.14, 0.07]]);
+      } else if (nextState === 'weak' && prevState === 'good' && nowMs - (this._lastSignalBeepMs || 0) > 2800) {
+        this._lastSignalBeepMs = nowMs;
+        this.playMelody([[760, 0.00, 0.06], [620, 0.08, 0.08]]);
+      }
+    }
+    this._lastSignalState = nextState;
+
+    return { distFromHome, rxRangeFrac, envObstruction, insideMetalRoof };
   }
 
   updatePhysics(delta) {
     if (!this.droneMesh) return;
     const p = this.physicsParams || this.computeDronePhysicsParams();
+    // Continuously evaluate real-world RF obstruction (trees, metal hangar, buildings, 5G EMI, terrain) even while landed!
+    const rfInfo = this.evaluateSignalEnvironment(p, delta);
     const clearance = p.clearance || 0.48;
     // Live Dynamic Mass & Parallel-Axis Inertia (decreases in real time as fertilizer is sprayed or cargo is dropped!)
     const curPayloadKg = Math.max(0, p.payloadTankKg * (this.payloadPercent / 100));
@@ -10845,8 +12208,9 @@ class DroneFlightSimulator {
         }
 
         const minGroundY = sampleMinGroundY(this.position.x, this.position.z);
-        this.sampleWindField(this.position.x, this.position.y, this.position.z, this.simTime, this.liveWindVec);
+        this.sampleWindField(this.position.x, this.position.y, this.position.z, this.simTime, this.liveWindVec, true);
         this.liveWindSpeed = Math.hypot(this.liveWindVec.x, this.liveWindVec.z);
+        this.windLevel = this.liveWindSpeed >= 11.0 ? 'storm' : this.liveWindSpeed >= 7.5 ? 'strong' : this.liveWindSpeed >= 3.5 ? 'moderate' : 'calm';
 
         // Auto-deploy Pyrotechnic 3D Recovery Parachute when falling from > 5m!
         if (p.hasParachute && !this.parachuteDeployed && !this.isLanded && (this.position.y - minGroundY) > 5.0 && this.velocity.y < -2.2) {
@@ -10924,6 +12288,9 @@ class DroneFlightSimulator {
 
       const finalGroundY = sampleMinGroundY(this.position.x, this.position.z);
       this.altitude = Math.max(0, Number((this.position.y - finalGroundY).toFixed(1)));
+      if (typeof this.updateAltitudeSensors === 'function') this.updateAltitudeSensors(p);
+      this.lidarZone = p.hasLidar ? 'clear' : 'off';
+      this.lidarNearestDist = null;
       this.speedKmh = Math.round(Math.hypot(this.velocity.x, this.velocity.z) * 3.6);
       return;
     }
@@ -10968,22 +12335,39 @@ class DroneFlightSimulator {
       this.setHudAlert('📦 บรรจุกล่องเวชภัณฑ์ใหม่เรียบร้อย!');
     }
 
-    // Live RC Receiver (RX) Signal Strength (RSSI) & Failsafe Range Check!
-    const distFromHome = Math.hypot(this.position.x, this.position.z);
-    const rxRangeFrac = distFromHome / Math.max(90, p.rxRangeMeters);
-    this.rssiPercent = Math.round(Math.max(0, Math.min(100, (1.12 - rxRangeFrac * 0.85) * 100)));
+    // Record live 3D flight breadcrumbs (every 3.5m) for automatic sensor/signal-loss backtracking!
+    if (typeof this.recordFlightBreadcrumb === 'function') {
+      this.recordFlightBreadcrumb();
+    }
+
+    // Live RC Receiver (RX) Signal Strength (RSSI), Obstruction Attenuation & Smart Auto-Return Failsafe!
+    const rxRangeFrac = rfInfo.rxRangeFrac;
     let rxSignalScale = 1.0;
-    if (rxRangeFrac > 1.02 && !this.isRTHMode) {
-      if (p.rxFailsafeRth && p.hasGps) {
-        this.isRTHMode = true;
-        this.isHoldMode = true;
-        this.rthPhase = 'CLIMB';
-        this.rthCruiseAlt = Math.max(this.position.y + 3.0, this.getTerrainHeight(0, 0) + 24.0);
-        this.playTone(880, 0.25);
-        this.setHudAlert('📡 FAILSAFE! หลุดระยะคลื่น RX — สั่ง RTH บินกลับฐานอัตโนมัติ', 4200);
+    const isRangeLost = rxRangeFrac > 1.02;
+    const isDeadZoneLost = !this.isLanded && !this.isCrashed && (this.rssiPercent <= 24 || (this.insideMetalRoof && this.signalState === 'critical'));
+
+    if (!this.isRTHMode) {
+      if (isRangeLost) {
+        if (p.rxFailsafeRth || p.hasGps || (this.flightPathHistory && this.flightPathHistory.length >= 2)) {
+          this.triggerSmartAutoReturn('หลุดระยะคลื่น RX!', true, false);
+        } else {
+          rxSignalScale = Math.max(0.32, Math.min(1.0, this.rssiPercent / 35));
+        }
+      } else if (isDeadZoneLost) {
+        this.signalLossTimer = (this.signalLossTimer || 0) + delta;
+        if (this.signalLossTimer >= 2.2) {
+          this.triggerSmartAutoReturn('สัญญาณ/เซนเซอร์ขาดหายในจุดอับ!', true, false);
+        } else {
+          rxSignalScale = Math.max(0.42, 0.42 + (this.rssiPercent / 24) * 0.58);
+        }
       } else {
-        rxSignalScale = Math.max(0.28, 1.0 - (rxRangeFrac - 1.0) * 1.4);
+        this.signalLossTimer = Math.max(0, (this.signalLossTimer || 0) - delta * 2.5);
+        if (this.rssiPercent < 30) {
+          rxSignalScale = Math.max(0.58, 0.58 + (this.rssiPercent / 30) * 0.42);
+        }
       }
+    } else {
+      this.signalLossTimer = 0;
     }
 
     // Hover calibration constants for LiPo/Li-Ion current draw (True Propeller Power Law: P ∝ ω^3 ∝ T^1.5)
@@ -10992,25 +12376,25 @@ class DroneFlightSimulator {
     const usableAh = p.capacityAh * 0.85;
     const hoverAmps = (usableAh * 60.0) / Math.max(0.8, p.estHoverMinutes);
 
-    // Check pilot manual override to cleanly cancel RTH (only if back inside RX range)
-    if (this.isRTHMode && rxRangeFrac < 0.98 && (
+    // Check pilot manual override to cleanly cancel RTH (only when link/sensor is back online!)
+    if (this.isRTHMode && !this.sensorLostSim && rxRangeFrac < 0.98 && this.rssiPercent >= 45 && (
       Math.abs(this.input.pitch) > 0.36 ||
       Math.abs(this.input.roll) > 0.36 ||
       Math.abs(this.input.throttle) > 0.48
     )) {
-      this.isRTHMode = false;
-      this.rthPhase = 'IDLE';
-      this.holdAltitude = this.position.y;
-      this.holdTargetPos.copy(this.position);
-      this.holdTargetLocked = false;
-      this.playTone(500, 0.12);
-      this.setHudAlert('ยกเลิก RTH — นักบินรับช่วงควบคุม');
+      this.cancelSmartAutoReturn('ยกเลิก RTH — นักบินรับช่วงควบคุม');
     }
 
-    // Compute 360° LiDAR obstacle avoidance once per frame (smooth & fast!)
-    const lidarAvoid = (p.hasLidar && !this.isLanded && !this.isRTHMode)
-      ? this.computeLidarAvoidance()
-      : { ax: 0, az: 0, triggered: false };
+    // Compute 360° LiDAR + mmWave Radar proximity scan & active obstacle avoidance once per frame!
+    let lidarAvoid = { ax: 0, az: 0, triggered: false };
+    if (p.hasLidar && !this.isLanded && !this.isRTHMode) {
+      lidarAvoid = this.computeLidarAvoidance();
+    } else {
+      this.lidarZone = p.hasLidar ? 'clear' : 'off';
+      this.lidarNearestDist = null;
+      this.lidarNearestDirTh = '';
+      this.lidarNearestTag = '';
+    }
     this.lidarBraking = lidarAvoid.triggered;
 
     let lastMinGroundY = sampleMinGroundY(this.position.x, this.position.z);
@@ -11021,8 +12405,9 @@ class DroneFlightSimulator {
       // 1. Atmosphere (ISA Exponential Air Density Lapse) & Live 3D Wind Field
       this.airDensity = 1.225 * Math.exp(-Math.max(0, this.position.y) / 8500);
       const densityRatio = this.airDensity / 1.225;
-      this.sampleWindField(this.position.x, this.position.y, this.position.z, this.simTime, this.liveWindVec);
+      this.sampleWindField(this.position.x, this.position.y, this.position.z, this.simTime, this.liveWindVec, true);
       this.liveWindSpeed = Math.hypot(this.liveWindVec.x, this.liveWindVec.z);
+      this.windLevel = this.liveWindSpeed >= 11.0 ? 'storm' : this.liveWindSpeed >= 7.5 ? 'strong' : this.liveWindSpeed >= 3.5 ? 'moderate' : 'calm';
 
       // Relative airspeed vector: v_air = v_ground - v_wind
       this._relAir.subVectors(this.velocity, this.liveWindVec);
@@ -11118,17 +12503,58 @@ class DroneFlightSimulator {
       let targetYawRate = 0;
       let thrustCmdN = weightN * 0.16;
 
-      if (this.isRTHMode && p.hasGps) {
+      if (this.isRTHMode && (p.hasGps || (this.rthWaypoints && this.rthWaypoints.length > 0))) {
         const dxHome = -this.position.x;
         const dzHome = -this.position.z;
         const distHome = Math.hypot(dxHome, dzHome);
         const hSpeed = Math.hypot(this.velocity.x, this.velocity.z);
         const homePadY = this.getTerrainHeight(0, 0) + clearance;
-        const maxRthTilt = Math.min(0.42, p.maxTiltRad);
+        const maxRthTilt = Math.min(0.42, curMaxTiltRad);
 
         let targetVz = 0;
         let axCmd = 0;
         let azCmd = 0;
+
+        if (this.rthPhase === 'PATH_RETURN') {
+          const wps = this.rthWaypoints || [];
+          const wp = wps[this.rthWaypointIdx];
+          if (!wp) {
+            this.rthPhase = distHome < 3.5 ? 'DESCEND' : 'RETURN';
+          } else {
+            const dxW = wp.x - this.position.x;
+            const dyW = wp.y - this.position.y;
+            const dzW = wp.z - this.position.z;
+            const distH = Math.hypot(dxW, dzW);
+
+            if (distH > 2.2) {
+              const desiredYaw = Math.atan2(dxW, dzW);
+              const yawErr = Math.atan2(Math.sin(desiredYaw - this.rotation.y), Math.cos(desiredYaw - this.rotation.y));
+              targetYawRate = Math.max(-1.8, Math.min(1.8, yawErr * 2.4));
+            }
+
+            // Backtrack/indoor waypoints fly slower and extra carefully; open A* corridor cruises smoothly up to 8.5 m/s!
+            const maxLegSpd = wp.kind === 'backtrack' ? 4.2 : wp.kind === 'climb' ? 2.5 : 8.5;
+            const legSpd = Math.min(maxLegSpd, distH * 0.95);
+            const dirX = distH > 0.01 ? dxW / distH : 0;
+            const dirZ = distH > 0.01 ? dzW / distH : 0;
+            const vxDes = dirX * legSpd;
+            const vzDes = dirZ * legSpd;
+            axCmd = (vxDes - this.velocity.x) * 1.85 + this.windEst.x * 0.85;
+            azCmd = (vzDes - this.velocity.z) * 1.85 + this.windEst.y * 0.85;
+            targetVz = Math.max(-3.0, Math.min(3.8, dyW * 1.75));
+
+            const isFinalWp = this.rthWaypointIdx >= wps.length - 1;
+            const tolH = isFinalWp ? 1.35 : (wp.kind === 'climb' ? 2.8 : 2.3);
+            const tolY = wp.kind === 'climb' ? 1.15 : 2.4;
+            if (distH < tolH && Math.abs(dyW) < tolY && (!isFinalWp || hSpeed < 1.6)) {
+              this.rthWaypointIdx++;
+              if (this.rthWaypointIdx >= wps.length) {
+                this.rthPhase = 'DESCEND';
+                this.playTone(720, 0.10);
+              }
+            }
+          }
+        }
 
         if (this.rthPhase === 'CLIMB') {
           if (distHome < 3.5 && this.position.y > homePadY + 2.0) {
@@ -11172,12 +12598,23 @@ class DroneFlightSimulator {
           const aglHome = Math.max(0, this.position.y - homePadY);
           targetVz = aglHome > 3.2 ? -1.85 : aglHome > 1.0 ? -1.05 : -0.58;
           if (this.isLanded && aglHome < 0.28) {
+            const wasFail = this.isFailsafeReturn || this.sensorLostSim;
             this.isArmed = false;
             this.isRTHMode = false;
+            this.isFailsafeReturn = false;
+            this.sensorLostSim = false;
             this.rthPhase = 'IDLE';
+            this.rthWaypoints = [];
+            this.rthWaypointIdx = 0;
             this.powerState = 'DISARMED';
+            if (typeof this.clearRthPathVisuals === 'function') this.clearRthPathVisuals();
             this.playMelody([[784, 0, 0.09], [587, 0.10, 0.09], [392, 0.20, 0.18]]);
-            this.setHudAlert('✅ RTH ลงจอดและดับมอเตอร์ที่ลาน H สำเร็จ!', 3400);
+            this.setHudAlert(
+              wasFail
+                ? '✅ คำนวณเส้นทางและบินกลับจุดเริ่มต้นสำเร็จ (ลงจอดและดับมอเตอร์แล้ว)!'
+                : '✅ RTH ลงจอดและดับมอเตอร์ที่ลาน H สำเร็จ!',
+              3800
+            );
             break;
           }
         }
@@ -11352,15 +12789,15 @@ class DroneFlightSimulator {
                   this.holdTargetLocked = true;
                 }
               } else {
-                const gpsNoiseAmp = p.isRtk ? 0.020 : 0.22;
+                const gpsNoiseAmp = (p.isRtk ? 0.020 : 0.22) * (this.gpsMultipathFactor || 1.0);
                 const gpsErrX = gpsNoiseAmp * (0.68 * Math.sin(this.simTime * 0.37) + 0.32 * Math.cos(this.simTime * 0.71));
                 const gpsErrZ = gpsNoiseAmp * (0.68 * Math.cos(this.simTime * 0.41) + 0.32 * Math.sin(this.simTime * 0.67));
                 const ex = (this.holdTargetPos.x + gpsErrX) - this.position.x;
                 const ez = (this.holdTargetPos.z + gpsErrZ) - this.position.z;
 
-                const kiWind = (p.isRtk ? 0.65 : 0.45) * (p.dualImu ? 1.18 : 1.0);
-                this.windEst.x = Math.max(-5.8, Math.min(5.8, this.windEst.x + ex * kiWind * dt));
-                this.windEst.y = Math.max(-5.8, Math.min(5.8, this.windEst.y + ez * kiWind * dt));
+                const kiWind = (p.isRtk ? 0.68 : 0.48) * (p.dualImu ? 1.18 : 1.0);
+                this.windEst.x = Math.max(-8.5, Math.min(8.5, this.windEst.x + ex * kiWind * dt));
+                this.windEst.y = Math.max(-8.5, Math.min(8.5, this.windEst.y + ez * kiWind * dt));
 
                 const kpPos = (p.isRtk ? 2.05 : 1.42) * Math.max(0.65, brakeScale);
                 const kdPos = (p.isRtk ? 2.55 : 2.15) * Math.max(0.65, brakeScale);
@@ -11411,6 +12848,13 @@ class DroneFlightSimulator {
                 this.altHoldLocked = true;
               }
             } else {
+              // Downward mmWave Terrain-Following Radar (when sensor_lidar is fitted): maintains safe >=1.6m ground clearance over rising slopes!
+              if (p.hasLidar && !this.isLanded && this.input.throttle >= -0.05) {
+                const safeFloorY = this.surfaceSupportY + 1.6;
+                if (this.holdAltitude < safeFloorY && this.position.y < safeFloorY + 0.4 && Math.hypot(this.velocity.x, this.velocity.z) > 0.6) {
+                  this.holdAltitude += (safeFloorY - this.holdAltitude) * (1 - Math.exp(-3.2 * dt));
+                }
+              }
               holdVz = Math.max(-3.2, Math.min(3.2, (this.holdAltitude - this.position.y) * (1.95 * Math.max(0.60, brakeScale))));
             }
 
@@ -11639,9 +13083,21 @@ class DroneFlightSimulator {
         }
       }
 
-      if (this.position.y > 320) {
-        this.position.y = 320;
+      // Realistic Drone-Class Firmware Altitude Geofence Ceiling (Agri 30m | FPV 50m | Aerial 90m | Heavy Survey 120m!)
+      const frameCeilingM = p.maxAltitudeLimitM || 90;
+      const maxAllowedY = minDroneY + frameCeilingM;
+      const remToCeiling = maxAllowedY - this.position.y;
+      if (remToCeiling < 2.5 && this.velocity.y > 0) {
+        // Soft firmware vertical brake approaching the ceiling (zero harsh bounce!)
+        const maxUpV = Math.max(0, remToCeiling * 1.6);
+        if (this.velocity.y > maxUpV) {
+          this.velocity.y += (maxUpV - this.velocity.y) * (1 - Math.exp(-12 * dt));
+        }
+      }
+      if (this.position.y >= maxAllowedY) {
+        this.position.y = maxAllowedY;
         this.velocity.y = Math.min(0, this.velocity.y);
+        this.holdAltitude = Math.min(this.holdAltitude, maxAllowedY);
       }
     }
 
@@ -11649,11 +13105,25 @@ class DroneFlightSimulator {
     this.droneMesh.rotation.copy(this.rotation);
 
     this.altitude = Math.max(0, Number((this.position.y - lastMinGroundY).toFixed(1)));
+    if (typeof this.updateAltitudeSensors === 'function') this.updateAltitudeSensors(p);
     if (this.altitude > this.maxAltitude) {
       this.maxAltitude = this.altitude;
     }
     const hSpeed = Math.hypot(this.velocity.x, this.velocity.z);
     this.speedKmh = Math.round(hSpeed * 3.6);
+
+    // Live Frame-Class Altitude Ceiling Feedback (notifies pilot when hitting 30m / 50m / 90m / 120m limit!)
+    const ceilingLim = p.maxAltitudeLimitM || 90;
+    const atCeiling = !this.isLanded && (this.altitude >= ceilingLim - 0.25 && (this.input.throttle > 0.04 || this.altitude >= ceilingLim - 0.05));
+    this.hitAltitudeLimit = atCeiling;
+    if (atCeiling && this.input.throttle > 0.08) {
+      const nowAltMs = performance.now();
+      if (nowAltMs - (this._lastAltLimitAlertMs || 0) > 3600) {
+        this._lastAltLimitAlertMs = nowAltMs;
+        this.playTone(620, 0.12);
+        this.setHudAlert(`🛑 ถึงเพดานสูงสุดของ${p.frameClassLabel} (${ceilingLim} ม.) — ${p.altitudeLimitReason}`, 3400);
+      }
+    }
 
     // Live Thailand Drone Law (CAAT) Monitoring: 90m Ceiling, Community Overflight & VLOS Range
     const nowLawMs = performance.now();
@@ -12015,8 +13485,13 @@ class DroneFlightSimulator {
     this.camYaw += (this.targetCamYaw - this.camYaw) * orbitAlpha;
     this.camPitch += (this.targetCamPitch - this.camPitch) * orbitAlpha;
 
+    // In FPV mode hide own drone mesh so arms/plates/props can NEVER clip into the camera lens at any speed or pitch!
+    if (this.droneMesh) {
+      this.droneMesh.visible = !this.isFPV;
+    }
+
     if (this.isFPV) {
-      // First Person Cockpit View (Silky Gimbal-Damped FPV Goggles Experience — zero micro-jolt!)
+      // First Person Cockpit View (Rigidly mounted to nose/gimbal = ZERO high-speed trailing lag + silky gimbal rotation damping!)
       if (!this._fpvCamPos) {
         this._fpvCamPos = new THREE.Vector3();
         this._fpvNose = new THREE.Vector3();
@@ -12025,30 +13500,44 @@ class DroneFlightSimulator {
         this._fpvLookQuat = new THREE.Quaternion();
         this._fpvFlipY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
       }
-      this._fpvNose.set(0, 0.08, 0.38).applyEuler(this.rotation);
+      const p = this.physicsParams;
+      const hasGimbal = Boolean(p && p.hasGimbal);
+      const wbM = (p && p.wheelbase) || 0.45;
+      const noseZ = wbM >= 0.74 ? 0.56 : wbM >= 0.56 ? 0.48 : wbM <= 0.30 ? 0.32 : 0.42;
+      const noseY = hasGimbal ? -0.06 : 0.10;
+      this._fpvNose.set(0, noseY, noseZ).applyEuler(this.rotation);
       this._fpvCamPos.copy(this.position).add(this._fpvNose);
       this.pushCameraOutsideColliders(this._fpvCamPos, 0.25);
 
       // Desired FPV orientation: 4K/NDVI/Thermal Gimbal stabilizes horizon; Fixed FPV locks to frame with 20° uptilt!
-      const p = this.physicsParams;
-      const hasGimbal = Boolean(p && p.hasGimbal);
       const fpvPitch = hasGimbal ? (0.08 + this.rotation.x * 0.20) : (this.rotation.x + 0.34);
       const fpvRoll = hasGimbal ? (this.rotation.z * 0.06) : this.rotation.z;
       this._fpvEuler.set(fpvPitch, this.rotation.y, fpvRoll, 'YXZ');
       this._fpvTargetQuat.setFromEuler(this._fpvEuler).multiply(this._fpvFlipY);
 
+      // Lock camera position rigidly to drone mount (no exponential trailing lag into fuselage when flying fast!)
+      this.camera.position.copy(this._fpvCamPos);
       if (!this.camInitialized) {
-        this.camera.position.copy(this._fpvCamPos);
         this.smoothFpvQuat.copy(this._fpvTargetQuat);
         this.camInitialized = true;
       } else {
-        const posA = 1 - Math.exp(-32.0 * dt);
         const rotA = 1 - Math.exp(-18.0 * dt);
-        this.camera.position.lerp(this._fpvCamPos, posA);
         this.smoothFpvQuat.slerp(this._fpvTargetQuat, rotA);
       }
       this.camera.quaternion.copy(this.smoothFpvQuat);
+
+      // Authentic wide-angle FPV lens FOV (84° on agile FPV cam, 74° on 4K/NDVI/Thermal gimbal + subtle speed kick!)
+      const targetFpvFov = (hasGimbal ? 74 : 84) + Math.min(8, (this.speedKmh || 0) * 0.10);
+      if (Math.abs(this.camera.fov - targetFpvFov) > 0.08) {
+        this.camera.fov += (targetFpvFov - this.camera.fov) * (1 - Math.exp(-10.0 * dt));
+        this.camera.updateProjectionMatrix();
+      }
     } else {
+      // Smoothly return to crisp 60° chase-cam FOV when in 3rd-person view
+      if (Math.abs(this.camera.fov - 60) > 0.08) {
+        this.camera.fov += (60 - this.camera.fov) * (1 - Math.exp(-10.0 * dt));
+        this.camera.updateProjectionMatrix();
+      }
       // AAA Polar Spring-Arm 3rd-Person Chase Camera (ZERO Cartesian chord wobble, ZERO tree-cone snaps, ZERO wall see-through!)
       if (!this._camPivot) {
         this._camPivot = new THREE.Vector3();
@@ -12185,6 +13674,19 @@ class DroneFlightSimulator {
         this.noiseGain.gain.setTargetAtTime(0.0001, this.audioCtx.currentTime, 0.08);
       }
     }
+
+    // Ambient atmospheric wind whoosh (swells gently in strong crosswind & rolling gusts!)
+    if (this.windGain && this.windFilter) {
+      const wspd = this.liveWindSpeed || 0;
+      if (wspd > 3.2) {
+        const wNorm = Math.min(1.0, (wspd - 3.2) / 11.5);
+        const gustBoost = this.windGustActive ? 1.35 : 1.0;
+        this.windGain.gain.setTargetAtTime(Math.min(0.24, wNorm * 0.16 * gustBoost), this.audioCtx.currentTime, 0.12);
+        this.windFilter.frequency.setTargetAtTime(240 + wNorm * 580 + (this.windGustActive ? 140 : 0), this.audioCtx.currentTime, 0.12);
+      } else {
+        this.windGain.gain.setTargetAtTime(0.0001, this.audioCtx.currentTime, 0.12);
+      }
+    }
   }
 
   triggerTelemetry() {
@@ -12195,8 +13697,13 @@ class DroneFlightSimulator {
       const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
       let flightModeLabel = 'ATTI';
-      if (this.isRTHMode && p.hasGps) {
-        flightModeLabel = `RTH (${this.rthPhase === 'CLIMB' ? 'ไต่ระดับ' : this.rthPhase === 'RETURN' ? 'บินกลับ' : 'ลงจอด'})`;
+      if (this.isRTHMode) {
+        const phaseTh = this.rthPhase === 'PATH_RETURN'
+          ? `ตามเส้นทาง ${Math.max(1, (this.rthWaypoints ? this.rthWaypoints.length : 1) - this.rthWaypointIdx)} จุด`
+          : this.rthPhase === 'CLIMB' ? 'ไต่ระดับ' : this.rthPhase === 'RETURN' ? 'บินกลับ' : 'ลงจอด';
+        flightModeLabel = (this.isFailsafeReturn || this.sensorLostSim)
+          ? `AUTO-RETURN (${phaseTh})`
+          : `RTH (${phaseTh})`;
       } else if (this.isHoldMode && p.hasGps) {
         flightModeLabel = p.isRtk ? 'RTK HOLD' : 'GPS HOLD';
       } else if (p.hasBaro) {
@@ -12213,6 +13720,13 @@ class DroneFlightSimulator {
 
       this.onTelemetryUpdate({
         altitude: this.altitude,
+        maxAltitudeLimitM: p.maxAltitudeLimitM || 90,
+        frameClassLabel: p.frameClassLabel || 'โดรนมาตรฐาน',
+        hitAltitudeLimit: Boolean(this.hitAltitudeLimit),
+        groundClearanceM: this.groundClearanceM || 0,
+        homeAltitudeM: this.homeAltitudeM || 0,
+        altSensorType: this.altSensorType || (p.hasLidar ? 'RADAR+TOF' : p.hasOpticalFlow ? 'SONAR' : p.hasBaro ? 'BARO' : 'NONE'),
+        altSensorLocked: Boolean(this.altSensorLocked),
         speedKmh: this.speedKmh,
         timeStr,
         flightTimeSeconds: this.flightTimeSeconds,
@@ -12220,11 +13734,20 @@ class DroneFlightSimulator {
         batteryVoltage: Number(this.batteryVoltage.toFixed(1)),
         currentAmps: Number(this.currentAmps.toFixed(1)),
         rssiPercent: this.rssiPercent,
+        signalState: this.signalState || 'good',
+        signalSource: this.signalSource || 'clear',
+        signalObstruction: Number((this.signalObstruction || 0).toFixed(2)),
+        insideMetalRoof: Boolean(this.insideMetalRoof),
+        rxType: p.rxType || 'elrs',
         payloadType: p.payloadType,
         payloadPercent: Math.round(this.payloadPercent),
         isSpraying: this.isSpraying,
         cargoAttached: this.cargoAttached,
         lidarBraking: this.lidarBraking,
+        lidarZone: this.lidarZone || (p.hasLidar ? 'clear' : 'off'),
+        lidarNearestDist: this.lidarNearestDist,
+        lidarNearestDirTh: this.lidarNearestDirTh || '',
+        lidarNearestTag: this.lidarNearestTag || '',
         parachuteDeployed: this.parachuteDeployed,
         hasLidar: p.hasLidar,
         hasOpticalFlow: p.hasOpticalFlow,
@@ -12247,12 +13770,59 @@ class DroneFlightSimulator {
         isHoldMode: this.isHoldMode,
         isRTHMode: this.isRTHMode,
         rthPhase: this.rthPhase,
+        isFailsafeReturn: Boolean(this.isFailsafeReturn),
+        sensorLostSim: Boolean(this.sensorLostSim),
+        rthAlgoLabel: this.rthAlgoLabel || '',
+        rthWaypointsRemaining: this.rthWaypoints ? Math.max(0, this.rthWaypoints.length - (this.rthWaypointIdx || 0)) : 0,
+        rthTotalPathDist: this.rthTotalPathDist || 0,
+        signalLossCountdown: this.signalLossTimer > 0.25 ? Number(Math.max(0, 2.2 - this.signalLossTimer).toFixed(1)) : 0,
+        distFromHomeM: Math.round(Math.hypot(this.position.x, this.position.z)),
         hasGps: p.hasGps,
         hasBaro: p.hasBaro,
         flightModeLabel,
         vrsIntensity: this.vrsIntensity,
         igeFactor: this.igeFactor,
         liveWindSpeed: Number(this.liveWindSpeed.toFixed(1)),
+        liveWindDirDeg: this.liveWindDirDeg || 0,
+        liveWindVertical: Number((this.liveWindVertical || 0).toFixed(1)),
+        windPreset: this.windPreset || 'mission',
+        windPresetShort: this.getWindPresetInfo().shortLabel,
+        windLevel: this.windLevel || 'calm',
+        windGustActive: Boolean(this.windGustActive),
+        windShelterPct: Math.round((1 - (this.windShelterFactor ?? 1.0)) * 100),
+        windScreenDeg: (() => {
+          const yView = this.isFPV ? (this.rotation.y || 0) : (this.smoothChaseYaw ?? (this.rotation.y + (this.camYaw || 0)));
+          const sY = Math.sin(yView);
+          const cY = Math.cos(yView);
+          const wRight = -this.liveWindVec.x * cY + this.liveWindVec.z * sY;
+          const wUp = this.liveWindVec.x * sY + this.liveWindVec.z * cY;
+          return Math.round(Math.atan2(-wUp, wRight) * (180 / Math.PI));
+        })(),
+        isFPV: Boolean(this.isFPV),
+        yawDeg: Math.round((((-(this.rotation.y || 0)) * (180 / Math.PI)) % 360 + 360) % 360),
+        verticalSpeedMs: Number(((this.velocity && this.velocity.y) || 0).toFixed(1)),
+        homeRelBearingDeg: (() => {
+          const toHomeX = -(this.position ? this.position.x : 0);
+          const toHomeZ = -(this.position ? this.position.z : 0);
+          if (Math.hypot(toHomeX, toHomeZ) < 1.2) return 0;
+          const y = (this.rotation && this.rotation.y) || 0;
+          const sY = Math.sin(y), cY = Math.cos(y);
+          const fwd = toHomeX * sY + toHomeZ * cY;
+          const right = -toHomeX * cY + toHomeZ * sY;
+          return Math.round(Math.atan2(right, fwd) * (180 / Math.PI));
+        })(),
+        cells: p.cells || 4,
+        cellVoltage: Number(((this.batteryVoltage || ((p.cells || 4) * 3.8)) / (p.cells || 4)).toFixed(2)),
+        throttlePct: (() => {
+          if (!this.isArmed) return 0;
+          const rpms = this.motorRpm || [0, 0, 0, 0];
+          const avg = (rpms[0] + rpms[1] + rpms[2] + rpms[3]) * 0.25;
+          return Math.round(Math.max(0, Math.min(100, avg * 100)));
+        })(),
+        hasGimbal: Boolean(p.hasGimbal),
+        cameraType: (this.stats && this.stats.resolvedParts && this.stats.resolvedParts.camera && this.stats.resolvedParts.camera.type) || 'gimbal_4k',
+        cameraName: (this.stats && this.stats.resolvedParts && this.stats.resolvedParts.camera && this.stats.resolvedParts.camera.name) || '4K Gimbal',
+        isSprayDrift: Boolean(this.isSpraying && !this.isLanded && this.liveWindSpeed >= 5.5),
         lawOverCeiling: this.lawOverCeiling,
         lawAltitudeViolated: this.lawAltitudeViolated,
         hudAlertText: activeAlert,

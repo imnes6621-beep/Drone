@@ -15,6 +15,7 @@ const DRONE_PARTS = {
       {
         id: 'frame_250',
         name: 'โครง 250 มม. (FPV เล็ก)',
+        frameClassLabel: 'โดรน FPV (250 มม.)',
         wheelbase: 250,
         weight: 96,
         price: 690,
@@ -22,14 +23,17 @@ const DRONE_PARTS = {
         maxPropSize: 5.5,
         maxMotorDiameter: 24,
         maxPayloadGrams: 320,
+        maxAltitudeLimitM: 50,
+        altitudeLimitReason: 'โดรน FPV ขนาดเล็กจำกัดเพดาน 50 ม. (ระยะสายตา VLOS และต้านลมระดับสูงจำกัด)',
         mountSpec: 'รูยึด 16×16',
-        chips: ['96 ก.', '฿690', 'ใบ 5"', 'มอเตอร์ ≤ 24 มม.', 'เพย์โหลด ≤ 320 ก.'],
-        desc: 'เบา คล่องตัวสูง ตอบสนองไว เหมาะกับบินซิ่ง FPV แต่รับลมและน้ำหนักบรรทุกได้น้อย',
-        lesson: 'โครง 250 มม. มีโมเมนต์ความเฉื่อยต่ำมาก ทำให้พลิกตัวไวและทำความเร็วสูง แต่ใส่ใบพัดได้ไม่เกิน 5 นิ้วและรับน้ำหนักเพิ่มได้จำกัด'
+        chips: ['96 ก.', '฿690', 'ใบ 5"', 'เพดาน ≤ 50 ม.', 'เพย์โหลด ≤ 320 ก.'],
+        desc: 'เบา คล่องตัวสูง ตอบสนองไว เหมาะกับบินซิ่ง FPV ระยะต่ำ–กลาง (จำกัดเพดาน 50 ม.)',
+        lesson: 'โครง 250 มม. มีโมเมนต์ความเฉื่อยต่ำมาก ทำให้พลิกตัวไวและทำความเร็วสูง แต่ตัวเครื่องเล็กจึงจำกัดเพดานบินจริงไว้ที่ 50 เมตรเพื่อให้มองเห็นด้วยตาเปล่า (VLOS) และไม่ถูกกระแสลมสูงพัดปลิว'
       },
       {
         id: 'frame_450',
         name: 'โครง 450 มม. (Aerial กลาง)',
+        frameClassLabel: 'โดรนถ่ายภาพ (450 มม.)',
         wheelbase: 450,
         weight: 178,
         price: 1190,
@@ -37,16 +41,19 @@ const DRONE_PARTS = {
         maxPropSize: 10.5,
         maxMotorDiameter: 26,
         maxPayloadGrams: 1100,
+        maxAltitudeLimitM: 90,
+        altitudeLimitReason: 'โดรนถ่ายภาพมาตรฐานจำกัดเพดาน 90 ม. (ตรงตามเพดานกฎหมาย กพท. ไทย)',
         mountSpec: 'รูยึด 16×16 / 19×19',
         recommended: true,
         badge: 'แนะนำ',
-        chips: ['178 ก.', '฿1,190', 'ใบ 9–10"', 'มอเตอร์ ≤ 26 มม.', 'เพย์โหลด ≤ 1.1 กก.'],
-        desc: 'สมดุลที่สุดสำหรับถ่ายภาพทางอากาศและผู้เริ่มต้น รับลมและกิมบอล 4K ได้ดี',
-        lesson: 'โครง 450 มม. เป็นขนาดมาตรฐานยอดนิยม ใส่ใบพัด 10 นิ้วที่ประหยัดพลังงานได้พอดี และมีพื้นที่เพลตกลางรองรับ FC/ESC/GPS/LiDAR ครบชุด'
+        chips: ['178 ก.', '฿1,190', 'ใบ 9–10"', 'เพดาน ≤ 90 ม.', 'เพย์โหลด ≤ 1.1 กก.'],
+        desc: 'สมดุลที่สุดสำหรับถ่ายภาพทางอากาศและผู้เริ่มต้น รับลมและกิมบอล 4K ได้ดี (เพดาน 90 ม. ตาม กพท.)',
+        lesson: 'โครง 450 มม. เป็นขนาดมาตรฐานยอดนิยม ใส่ใบพัด 10 นิ้วที่ประหยัดพลังงานได้พอดี และจำกัดเพดานบินไว้ที่ 90 เมตร (300 ฟุต) ตรงตามกฎหมายการบินพลเรือนไทย (CAAT)'
       },
       {
         id: 'frame_650',
         name: 'โครง 650 มม. (Heavy Survey)',
+        frameClassLabel: 'โดรนสำรวจหนัก (650 มม.)',
         wheelbase: 650,
         weight: 312,
         price: 1890,
@@ -54,14 +61,17 @@ const DRONE_PARTS = {
         maxPropSize: 15,
         maxMotorDiameter: 30,
         maxPayloadGrams: 2800,
+        maxAltitudeLimitM: 120,
+        altitudeLimitReason: 'โดรนสำรวจอุตสาหกรรมจำกัดเพดาน 120 ม. (400 ฟุต · เกิน 90 ม. ในไทยต้องขออนุญาต กพท.)',
         mountSpec: 'รูยึด 19×19 / 25×25',
-        chips: ['312 ก.', '฿1,890', 'ใบ 12–15"', 'มอเตอร์ ≤ 30 มม.', 'เพย์โหลด ≤ 2.8 กก.'],
-        desc: 'แขนท่อคาร์บอนขนาดใหญ่ ยกกล้อง Thermal/RTK หรือรอกส่งพัสดุได้ดีมาก นิ่งสู้ลมแรง',
-        lesson: 'โครง 650 มม. ใช้แขนท่อคาร์บอนไฟเบอร์รับแรงบิดสูง เหมาะกับใบพัด 12 นิ้วและมอเตอร์รอบต่ำแรงบิดสูงสำหรับงานสำรวจและยกหนัก'
+        chips: ['312 ก.', '฿1,890', 'ใบ 12–15"', 'เพดาน ≤ 120 ม.', 'เพย์โหลด ≤ 2.8 กก.'],
+        desc: 'แขนท่อคาร์บอนขนาดใหญ่ ยกกล้อง Thermal/RTK ตรวจเสาสูงและทำแผนที่ได้ถึง 120 ม. นิ่งสู้ลมแรง',
+        lesson: 'โครง 650 มม. ใช้แขนท่อคาร์บอนไฟเบอร์รับแรงบิดสูง รองรับงานสำรวจอุตสาหกรรมและการตรวจสอบโครงสร้างสูงได้ถึง 120 เมตร (400 ฟุต — หากบินเกิน 90 ม. ในไทยต้องยื่นขออนุญาตพิเศษจาก กพท.)'
       },
       {
         id: 'frame_800_agri',
         name: 'โครง 800 มม. (Agri พับแขนได้)',
+        frameClassLabel: 'โดรนเกษตร (800 มม.)',
         wheelbase: 800,
         isAgriFrame: true,
         weight: 465,
@@ -70,11 +80,13 @@ const DRONE_PARTS = {
         maxPropSize: 18,
         maxMotorDiameter: 36,
         maxPayloadGrams: 5500,
+        maxAltitudeLimitM: 30,
+        altitudeLimitReason: 'โดรนเกษตรล็อกเพดาน 30 ม. (มาตรฐานโดรนพ่นปุ๋ย ป้องกัน Spray Drift และให้อยู่ในระยะเรดาร์วัดพื้น)',
         mountSpec: 'ข้อพับ CNC · รูยึด 25×25 / 30×30',
         badge: 'งานเกษตร',
-        chips: ['465 ก.', '฿3,290', 'ใบ 14–18"', 'ข้อพับ CNC', 'เพย์โหลด ≤ 5.5 กก.'],
-        desc: 'โครงเกษตรคาร์บอนพับแขนได้ แข็งแรงระดับอุตสาหกรรม รองรับถังพ่นปุ๋ยและใบพัด 16 นิ้ว',
-        lesson: 'โดรนเกษตรต้องแบกถังปุ๋ยที่หนักหลายกิโลกรัม จึงใช้โครงท่อคาร์บอนหนาขนาด 800 มม. พร้อมข้อพับอะลูมิเนียม CNC เพื่อพับเก็บขนย้ายไปแปลงนาได้สะดวก'
+        chips: ['465 ก.', '฿3,290', 'ใบ 14–18"', 'เพดาน ≤ 30 ม.', 'เพย์โหลด ≤ 5.5 กก.'],
+        desc: 'โครงเกษตรคาร์บอนพับแขนได้ รองรับถังพ่นปุ๋ยและใบพัด 16 นิ้ว (ล็อกเพดานบินต่ำ ≤ 30 ม. ตามมาตรฐานเกษตร)',
+        lesson: 'โดรนเกษตรจริง (เช่น DJI Agras / XAG) จะถูกล็อกเพดานบินด้วยเฟิร์มแวร์ไว้ที่ 20–30 เมตร เพื่อป้องกันละอองปุ๋ยปลิวเข้าชุมชน (Spray Drift), ประหยัดแบตเตอรี่จากการแบกถังหนัก และให้อยู่ในระยะทำงานของเรดาร์วัดพื้น'
       }
     ]
   },
@@ -600,10 +612,10 @@ const DRONE_PARTS = {
   sensor: {
     id: 'sensor',
     num: '10',
-    calloutCode: 'J · เซนเซอร์/LiDAR',
-    name: 'เซนเซอร์ช่วยบิน / LiDAR',
-    enName: 'Obstacle & Altitude Sensor',
-    lesson: 'เซนเซอร์ช่วยบินเสริมความปลอดภัยให้โดรนยุคใหม่ — Optical Flow + Sonar ใต้ท้องช่วยล็อกตำแหน่งนิ่งในระดับต่ำ (< 6 ม.) แม้ไม่มี GPS ส่วน LiDAR 360° ยิงเลเซอร์วัดระยะสิ่งกีดขวางรอบตัวเพื่อช่วยเบรกชะลออัตโนมัติก่อนชนอาคารหรือต้นไม้',
+    calloutCode: 'J · เซนเซอร์/LiDAR·Radar',
+    name: 'เซนเซอร์วัดพื้น / Radar & LiDAR',
+    enName: 'Altitude, Radar & LiDAR Sensor',
+    lesson: 'เซนเซอร์วัดระยะห่างจากพื้น (AGL) และกันชนรอบตัว — โซนาร์ใต้ท้อง (Ultrasonic Sonar 40kHz) วัดระยะห่างพื้นถึงตัวโดรนแม่นยำในระยะ 0–6 ม. ส่วนชุด 360° LiDAR (แสงเลเซอร์ความละเอียดระดับมิลลิเมตร) ผสานกับ mmWave Radar (คลื่นวิทยุ 24/77GHz ที่ทะลุฝน ฝุ่น และละอองปุ๋ยได้) ช่วยสแกนสิ่งกีดขวางรอบตัว 14 ม., เบรกกันชนอัตโนมัติใน 4 ม. และรักษาระดับความสูงเหนือเนินลาด (Terrain Following)!',
     options: [
       {
         id: 'sensor_none',
@@ -612,34 +624,34 @@ const DRONE_PARTS = {
         hasLidar: false,
         weight: 0,
         price: 0,
-        chips: ['0 ก.', '฿0', 'ไม่มีระบบกันชน'],
-        desc: 'ประหยัดน้ำหนักสุด เหมาะกับนักบิน FPV ที่ต้องการบินลอดช่องแคบเองโดยไม่ถูกเบรก',
-        lesson: 'โดรนแข่ง FPV มักไม่ติดเซนเซอร์กันชนเพื่อลดน้ำหนักและไม่ให้ระบบเบรกอัตโนมัติขัดขวางการบินลอดช่องแคบ'
+        chips: ['0 ก.', '฿0', 'วัดความสูงด้วย Baro เท่านั้น'],
+        desc: 'ประหยัดน้ำหนักสุด ไม่มีลำแสงวัดพื้นและไม่มีกันชน เหมาะกับนักบิน FPV ที่คุมเองทั้งหมด',
+        lesson: 'โดรนแข่ง FPV มักไม่ติดเซนเซอร์กันชนเพื่อลดน้ำหนัก และใช้เพียงบารอมิเตอร์หรือกะระยะด้วยสายตาผ่านกล้อง FPV'
       },
       {
         id: 'sensor_optflow',
-        name: 'Optical Flow + Sonar ใต้ท้อง',
+        name: 'Optical Flow + Sonar วัดพื้นใต้ท้อง',
         hasOpticalFlow: true,
         hasLidar: false,
         weight: 18,
         price: 890,
         recommended: true,
         badge: 'แนะนำ',
-        chips: ['18 ก.', '฿890', 'VPS ล็อกต่ำ < 6 ม.', 'ลงจอดนุ่มนวล'],
-        desc: 'กล้องและโซนาร์ใต้ท้องช่วยเบรกการไหลแนวนอนในระยะต่ำกว่า 6 ม. แม้อยู่ในโหมด ATTI / ในโรงเก็บ',
-        lesson: 'ระบบ Vision Positioning (Optical Flow + Sonar) จับภาพพื้นผิวใต้ท้องโดรน ช่วยให้ลอยตัวนิ่งมากเวลาบินต่ำหรือลงจอดในอาคารที่อับสัญญาณ GPS'
+        chips: ['18 ก.', '฿890', 'Sonar วัดพื้น 0–6 ม.', 'VPS ล็อกต่ำ'],
+        desc: 'ยิงคลื่นเสียงโซนาร์วัดระยะห่างพื้นถึงตัวโดรนแม่นยำ (0–6 ม. แสดงลำแสงวัดพื้นสีฟ้า) + ช่วยเบรกนิ่งในอาคาร',
+        lesson: 'Ultrasonic Sonar ใช้เวลาสะท้อนของคลื่นเสียงความถี่สูง (d = v·Δt/2) วัดระยะห่างจากพื้นหรือหลังคาใต้ท้องโดรนแม่นยำระดับเซนติเมตร พร้อม Optical Flow ล็อกตำแหน่งเมื่ออับ GPS'
       },
       {
         id: 'sensor_lidar',
-        name: '360° LiDAR + Radar กันชน',
+        name: '360° LiDAR + mmWave Radar กันชน & วัดพื้น',
         hasOpticalFlow: true,
         hasLidar: true,
         weight: 62,
         price: 2950,
-        badge: 'กันชนอัตโนมัติ',
-        chips: ['62 ก.', '฿2,950', 'LiDAR หมุน 360°', 'เบรกก่อนชนอัตโนมัติ', 'VPS ใต้ท้อง'],
-        desc: 'ป้อมเลเซอร์ LiDAR หมุน 360° ตรวจจับตึก/เสา/ต้นไม้แล้วเบรกชะลออัตโนมัติ + รักษาระดับพื้นแม่นยำ',
-        lesson: 'LiDAR ยิงลำแสงเลเซอร์วัดระยะสิ่งกีดขวางรอบทิศทาง ทำให้ระบบ Flight Controller สั่งเบรกต้านก่อนพุ่งชนอาคารหรือเสาไฟฟ้าได้จริง'
+        badge: 'Radar + LiDAR',
+        chips: ['62 ก.', '฿2,950', 'สแกน 360° (14 ม.)', 'เบรกกันชน < 4 ม.', 'วัดพื้น Radar 35 ม.'],
+        desc: 'ผสานเลเซอร์ LiDAR 360° (แม่นสูง) + mmWave Radar (ทะลุละอองปุ๋ย/หมอก) วัดระยะพื้น 35 ม. และเบรกก่อนชนอัตโนมัติ!',
+        lesson: 'Sensor Fusion ระหว่าง LiDAR (แสงเลเซอร์ 905nm เห็นกิ่งไม้/สายไฟชัด) กับ mmWave Radar (คลื่นไมโครเวฟ 24/77GHz ทะลุฝุ่น ฝน และละอองปุ๋ยเกษตร) พร้อม Radar Altimeter รักษาระดับเหนือพื้นลาดอัตโนมัติ (Terrain Following)'
       }
     ]
   },
@@ -1130,9 +1142,10 @@ function calculateDroneStats(assembly) {
   const hoverSecs = Math.floor((hoverMinutesTotal - hoverMins) * 60);
   const estHoverSecStr = `${String(hoverMins).padStart(2, '0')}:${String(hoverSecs).padStart(2, '0')}`;
   const hoverCurrentAmps = Number(((bat.capacity / 1000) * 0.85 * 60 / Math.max(0.8, hoverMinutesTotal)).toFixed(1));
+  const frameAltLimit = (resolvedParts.frame && resolvedParts.frame.maxAltitudeLimitM) || 90;
   const maxClimbAltitude = twRatio <= 1.0
     ? 0
-    : Math.min(220, Math.round(Math.max(0, twRatio - 1.0) * 34 + (packWh * 0.85)));
+    : Math.min(frameAltLimit, Math.round(Math.max(0, twRatio - 1.0) * 34 + (packWh * 0.85)));
 
   return {
     isComplete: true,
@@ -1149,6 +1162,9 @@ function calculateDroneStats(assembly) {
     maxCurrentAmps: hoverCurrentAmps,
     totalPrice,
     maxClimbAltitude,
+    maxAltitudeLimitM: frameAltLimit,
+    frameClassLabel: (resolvedParts.frame && resolvedParts.frame.frameClassLabel) || 'โดรนมาตรฐาน',
+    altitudeLimitReason: (resolvedParts.frame && resolvedParts.frame.altitudeLimitReason) || '',
     resolvedParts
   };
 }
