@@ -458,19 +458,18 @@ class DroneApp {
 
     this.currentScreen = screenId;
 
-    // Toggle header visibility & locked state
+    // Toggle header visibility & locked state (Hide top nav bar on Home & ALL Simulator flights for clean 100vh HUD!)
     const header = document.getElementById('main-app-header');
+    const isSimulator = screenId === 'simulator';
     if (header) {
-      const isMissionFlight = screenId === 'simulator' && this.selectedMission && this.selectedMission.id !== 'free_flight';
       header.classList.toggle('course-locked', isCourseLocked);
-      header.classList.toggle('home-hidden', screenId === 'home' || (!isCourseLocked && isMissionFlight));
+      header.classList.toggle('home-hidden', screenId === 'home' || (!isCourseLocked && isSimulator));
     }
 
-    // Full height simulator when header hidden
+    // Full 100vh viewport for Flight Simulator (both Free Flight and Missions)
     const simScreen = document.querySelector('.flight-sim-screen');
     if (simScreen) {
-      const isMissionFlight = screenId === 'simulator' && this.selectedMission && this.selectedMission.id !== 'free_flight';
-      simScreen.style.height = isMissionFlight ? '100vh' : 'calc(100vh - 58px)';
+      simScreen.style.height = '100%';
     }
 
     document.querySelectorAll('.screen-view').forEach(el => el.classList.remove('active'));
@@ -516,6 +515,7 @@ class DroneApp {
       this.renderQuizScreen();
     } else if (screenId === 'simulator' && this.flightSim) {
       this.flightSim.onWindowResize();
+      requestAnimationFrame(() => this.flightSim.onWindowResize());
     }
 
     this.syncActiveRenderLoops(screenId);
@@ -685,7 +685,53 @@ class DroneApp {
       btnSound.addEventListener('click', () => {
         if (this.flightSim) {
           const isMuted = this.flightSim.toggleMute();
-          btnSound.innerText = isMuted ? '🔇' : '🔊';
+          btnSound.innerText = isMuted ? '🔇 เสียงจำลอง: ปิด' : '🔊 เสียงจำลอง: เปิด';
+        }
+      });
+    }
+
+    // Collapsible Settings & Keybinds Popovers inside Bottom Floating Flight Dock
+    const settingsPop = document.getElementById('hud-settings-popover');
+    const keysPop = document.getElementById('hud-keys-popover');
+    const btnSettingsToggle = document.getElementById('btn-hud-settings-toggle');
+    const btnKeysToggle = document.getElementById('btn-hud-keys-toggle');
+    const closeHudPopovers = () => {
+      if (settingsPop) settingsPop.classList.add('hidden');
+      if (keysPop) keysPop.classList.add('hidden');
+      if (btnSettingsToggle) btnSettingsToggle.classList.remove('popover-open');
+      if (btnKeysToggle) btnKeysToggle.classList.remove('popover-open');
+    };
+    if (btnSettingsToggle && settingsPop) {
+      btnSettingsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const willOpen = settingsPop.classList.contains('hidden');
+        closeHudPopovers();
+        if (willOpen) {
+          settingsPop.classList.remove('hidden');
+          btnSettingsToggle.classList.add('popover-open');
+        }
+      });
+    }
+    if (btnKeysToggle && keysPop) {
+      btnKeysToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const willOpen = keysPop.classList.contains('hidden');
+        closeHudPopovers();
+        if (willOpen) {
+          keysPop.classList.remove('hidden');
+          btnKeysToggle.classList.add('popover-open');
+        }
+      });
+    }
+    const simCanvasEl = document.getElementById('flight-sim-canvas');
+    if (simCanvasEl) {
+      simCanvasEl.addEventListener('pointerdown', closeHudPopovers);
+    }
+    const windPillBtn = document.getElementById('hud-wind-pill');
+    if (windPillBtn) {
+      windPillBtn.addEventListener('click', () => {
+        if (this.flightSim && typeof this.flightSim.cycleWindPreset === 'function') {
+          this.flightSim.cycleWindPreset();
         }
       });
     }
@@ -2965,7 +3011,20 @@ class DroneApp {
 
     document.getElementById('hud-mission-title').innerText = mission.title;
     document.getElementById('hud-time-label').innerText = mission.timeLimit ? 'เวลาเหลือ' : 'เวลาบิน';
-    document.getElementById('hud-checkpoint-val').innerText = mission.checkpoints.length > 0 ? `0 / ${mission.checkpoints.length}` : '—';
+    const hasCheckpoints = mission.checkpoints && mission.checkpoints.length > 0;
+    document.getElementById('hud-checkpoint-val').innerText = hasCheckpoints ? `0 / ${mission.checkpoints.length}` : '—';
+    const cpTile = document.getElementById('hud-checkpoint-tile');
+    if (cpTile) cpTile.classList.toggle('hidden', !hasCheckpoints);
+
+    // Close HUD popovers cleanly on flight launch
+    ['hud-settings-popover', 'hud-keys-popover'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('hidden');
+    });
+    ['btn-hud-settings-toggle', 'btn-hud-keys-toggle'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('popover-open');
+    });
 
     // Hide RC widget in Free Flight (matches surge.sh step_30), show in Mission Flight (step_26)
     const rcWidget = document.getElementById('rc-widget-osd');
@@ -3001,21 +3060,21 @@ class DroneApp {
     if (altSub) {
       const sType = telemetry.altSensorType || 'BARO';
       if (telemetry.lawOverCeiling) {
-        altSub.innerText = '⚠️ เกินเพดาน 90ม. (กพท.)';
+        altSub.innerText = '⚠️ เกิน 90ม (กพท.)';
       } else if (telemetry.hitAltitudeLimit) {
-        altSub.innerText = `🛑 ลิมิตสูงสุด ${altLimitM}ม.`;
+        altSub.innerText = `🛑 ลิมิต ${altLimitM}ม`;
       } else if (sType === 'RADAR+TOF') {
         altSub.innerText = telemetry.altSensorLocked
-          ? `📡 พื้น ${aglVal.toFixed(1)}ม · ฐาน ${homeAltVal.toFixed(1)}ม`
-          : `BARO · ฐาน ${homeAltVal.toFixed(1)}ม`;
+          ? `พื้น ${aglVal.toFixed(1)}ม · ฐาน ${homeAltVal.toFixed(1)}ม`
+          : `BARO · ${homeAltVal.toFixed(1)}ม`;
       } else if (sType === 'SONAR') {
         altSub.innerText = telemetry.altSensorLocked
-          ? `🔊 Sonar พื้น ${aglVal.toFixed(2)}ม`
-          : `BARO · เกินระยะ Sonar (>6ม)`;
+          ? `Sonar ${aglVal.toFixed(2)}ม`
+          : `BARO · ${homeAltVal.toFixed(1)}ม`;
       } else if (sType === 'BARO') {
-        altSub.innerText = `BARO · ฐาน ${homeAltVal.toFixed(1)}ม`;
+        altSub.innerText = `BARO · ${homeAltVal.toFixed(1)}ม`;
       } else {
-        altSub.innerText = 'MANUAL F4 (ไม่มี Baro)';
+        altSub.innerText = 'MANUAL F4';
       }
     }
 
@@ -3050,22 +3109,22 @@ class DroneApp {
         } else {
           sensorTile.classList.add('sensor-clear');
           sensorVal.innerText = telemetry.isSpraying ? 'Radar โล่ง' : 'โล่ง >14ม.';
-          sensorSub.innerText = telemetry.isSpraying ? 'ทะลุละอองปุ๋ย 360°' : 'สแกน 360° + วัดพื้น';
+          sensorSub.innerText = telemetry.isSpraying ? 'ทะลุละออง 360°' : '360° + วัดพื้น';
         }
       } else if (telemetry.hasOpticalFlow) {
-        if (sensorLbl) sensorLbl.innerText = 'Sonar / VPS';
+        if (sensorLbl) sensorLbl.innerText = 'Sonar';
         if (telemetry.altSensorLocked) {
           sensorTile.classList.add('sensor-sonar');
-          sensorVal.innerText = `พื้น ${aglVal.toFixed(2)} ม.`;
-          sensorSub.innerText = 'Optical Flow + Sonar';
+          sensorVal.innerText = `${aglVal.toFixed(2)} ม.`;
+          sensorSub.innerText = 'Sonar ล็อกพื้น';
         } else {
           sensorVal.innerText = '> 6.0 ม.';
-          sensorSub.innerText = 'เกินระยะ Sonar ใต้ท้อง';
+          sensorSub.innerText = 'เกินระยะ Sonar';
         }
       } else {
-        if (sensorLbl) sensorLbl.innerText = 'LiDAR / Radar';
+        if (sensorLbl) sensorLbl.innerText = 'LiDAR';
         sensorVal.innerText = 'ไม่ได้ติด';
-        sensorSub.innerText = 'ติดเพิ่มที่ช่อง 10';
+        sensorSub.innerText = 'ช่อง 10';
       }
     }
     document.getElementById('hud-speed-val').innerText = `${telemetry.speedKmh} กม./ชม.`;
@@ -3079,9 +3138,17 @@ class DroneApp {
       document.getElementById('hud-time-val').innerText = telemetry.timeStr;
     }
 
-    const voltStr = telemetry.batteryVoltage ? ` (${telemetry.batteryVoltage.toFixed(1)}V)` : '';
+    const voltStr = telemetry.batteryVoltage ? ` · ${telemetry.batteryVoltage.toFixed(1)}V` : '';
     document.getElementById('hud-bat-val').innerText = `${telemetry.batteryPercent}%${voltStr}`;
-    document.getElementById('hud-bat-bar').style.width = `${telemetry.batteryPercent}%`;
+    const batBarEl = document.getElementById('hud-bat-bar');
+    if (batBarEl) {
+      batBarEl.style.width = `${telemetry.batteryPercent}%`;
+      batBarEl.style.background = telemetry.batteryPercent <= 22
+        ? '#ef4444'
+        : telemetry.batteryPercent <= 40
+          ? '#f59e0b'
+          : '#22c55e';
+    }
 
     const devLabel = document.getElementById('osd-input-device');
     if (devLabel && telemetry.inputDevice) {
@@ -3145,16 +3212,17 @@ class DroneApp {
     const btnGfx = document.getElementById('btn-hud-graphics');
     if (btnGfx && telemetry.graphicsQuality) {
       const gfxTexts = {
-        fast: '⚡ ลื่นสุด',
-        balanced: '⚖️ สมดุล',
-        high: '✨ คมชัด'
+        fast: '⚡ กราฟิก · ลื่นสุด (60 FPS)',
+        balanced: '⚖️ กราฟิก · สมดุล',
+        high: '✨ กราฟิก · คมชัด'
       };
-      btnGfx.innerText = gfxTexts[telemetry.graphicsQuality] || '⚖️ สมดุล';
+      btnGfx.innerText = gfxTexts[telemetry.graphicsQuality] || '⚖️ กราฟิก · สมดุล';
       btnGfx.classList.toggle('primary', telemetry.graphicsQuality === 'fast');
     }
     const btnWind = document.getElementById('btn-hud-wind');
     if (btnWind && telemetry.windPresetShort) {
-      btnWind.innerText = telemetry.windPresetShort;
+      const cleanWind = telemetry.windPresetShort.replace(/^🌬️\s*/, '');
+      btnWind.innerText = `🌬️ ระดับลม · ${cleanWind}`;
       btnWind.classList.toggle('primary', telemetry.windPreset === 'strong' || telemetry.windPreset === 'storm');
     }
     const btnFailsafe = document.getElementById('btn-hud-failsafe');
@@ -3439,22 +3507,29 @@ class DroneApp {
         ledText.innerText = `🔵 ${telemetry.flightModeLabel}${algoTag} — เหลือ ${telemetry.distFromHomeM || 0} ม. สู่จุดเริ่มต้น H (กด R ยกเลิก)`;
       } else if (telemetry.isArmed && pState === 'ARMED_IDLE') {
         ledDot.className = 'led-dot ready';
+        const compactPayload = (telemetry.payloadType === 'sprayer' || telemetry.payloadType === 'spreader')
+          ? ` · ถัง ${telemetry.payloadPercent}%`
+          : (telemetry.payloadType === 'cargo' ? (telemetry.cargoAttached ? ' · 📦พร้อมปลด' : ' · 📦ปลดแล้ว') : '');
         const holdNote = (telemetry.touchdownHoldPct || 0) > 10
-          ? `⏹ กำลังดับมอเตอร์อัตโนมัติ (${telemetry.touchdownHoldPct}%)...`
-          : `🟢 ARMED (เดินเบา) — กด Space/T บินขึ้น · B หรือ Shift ค้าง ดับเครื่อง${payloadTag}`;
+          ? `กำลังดับมอเตอร์ (${telemetry.touchdownHoldPct}%)...`
+          : `ARMED · กด Space/T บินขึ้น${compactPayload}`;
         ledText.innerText = holdNote;
       } else if (telemetry.isArmed) {
         ledDot.className = 'led-dot ready';
         const igeTag = (!telemetry.isLanded && telemetry.igeFactor > 1.04) ? ' · IGE' : '';
+        const compactPayload = (telemetry.payloadType === 'sprayer' || telemetry.payloadType === 'spreader')
+          ? ` · ${telemetry.isSpraying ? '💧พ่น' : 'ถัง'} ${telemetry.payloadPercent}%`
+          : (telemetry.payloadType === 'cargo' ? (telemetry.cargoAttached ? ' · 📦พร้อมปลด' : ' · 📦ปลดแล้ว') : '');
         const modeTxt = telemetry.flightModeLabel || 'ARMED';
-        ledText.innerText = `🟢 ${modeTxt} · RX ${rssiVal}% · ลม ${telemetry.liveWindSpeed || 0} ม./วิ${igeTag}${payloadTag}`;
+        // Zero duplication: RX% and Wind are already displayed in dedicated pills right beside this label!
+        ledText.innerText = `${modeTxt}${igeTag}${compactPayload}`;
       } else {
         ledDot.className = sigState === 'critical' ? 'led-dot danger' : sigState === 'weak' ? 'led-dot warning' : 'led-dot standby';
         const readyMode = telemetry.hasGps
-          ? (telemetry.flightModeLabel === 'RTK HOLD' ? 'RTK GPS พร้อม' : 'GPS พร้อม')
-          : (telemetry.hasBaro ? 'BARO พร้อม (ไม่มี GPS)' : 'MANUAL F4 (ไม่มี Baro/GPS)');
-        const sigNote = sigState !== 'good' ? ` · ⚠️ ${sigReasonLong} (RX ${rssiVal}%)` : '';
-        ledText.innerText = `🟡 STANDBY — ${readyMode}${sigNote}${payloadTag} · กด B สตาร์ท หรือ T บินขึ้น`;
+          ? (telemetry.flightModeLabel === 'RTK HOLD' ? 'RTK พร้อมบิน' : 'GPS พร้อมบิน')
+          : (telemetry.hasBaro ? 'BARO พร้อมบิน' : 'MANUAL F4');
+        const sigNote = sigState !== 'good' ? ` · ${sigReasonShort || 'สัญญาณอ่อน'}` : '';
+        ledText.innerText = `STANDBY · ${readyMode}${sigNote}`;
       }
     }
 

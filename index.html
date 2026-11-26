@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20261126i">
+  <link rel="stylesheet" href="css/style.css?v=20261126k">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -482,71 +482,63 @@
       <div class="flight-canvas-container" id="flight-sim-canvas"></div>
 
       <div class="flight-hud-overlay">
+        <!-- SINGLE ULTRA-CLEAN TOP GLASS BAR (No stacked nav bar, zero duplicates) -->
         <div class="hud-top-bar">
           <div class="hud-objective-card" id="hud-objective-card">
+            <button type="button" class="hud-back-btn" id="btn-hud-home" title="กลับหน้าแรก">←</button>
             <h3 id="hud-mission-title">บินอิสระ</h3>
-            <div class="drone-led-indicator" id="hud-led-status" title="สัญลักษณ์สถานะไฟ LED ของโดรน">
+            <div class="drone-led-indicator" id="hud-led-status" title="สถานะไฟ LED และโหมดควบคุมของโดรน">
               <span class="led-dot standby" id="hud-led-dot"></span>
-              <span id="hud-led-text">🟡 STANDBY — ยังไม่ ARM</span>
+              <span id="hud-led-text">STANDBY · พร้อมบิน</span>
             </div>
-            <div class="hud-signal-pill good" id="hud-signal-pill" title="สถานะความแรงคลื่นวิทยุ (RX) และจุดอับสัญญาณ (ต้นไม้ / อาคาร / โรงเก็บโลหะ / เสา 5G)">
+            <div class="hud-signal-pill good" id="hud-signal-pill" title="ความแรงคลื่นวิทยุ (RX) และจุดอับสัญญาณ">
               <span class="signal-led-dot" id="hud-signal-dot"></span>
               <span class="signal-bars" id="hud-signal-bars" aria-hidden="true">
                 <i class="active"></i><i class="active"></i><i class="active"></i><i class="active"></i>
               </span>
               <span id="hud-signal-text">RX 100%</span>
             </div>
-            <div class="hud-wind-pill calm" id="hud-wind-pill" title="ทิศทางและความแรงลมจริง ณ ตำแหน่งโดรน (ลูกศรชี้ทิศทางที่ลมพัดโดรนไป · กด N ปรับระดับลม)">
+            <button type="button" class="hud-wind-pill calm" id="hud-wind-pill" title="ทิศทางและความแรงลมจริง — คลิกหรือกด N เพื่อปรับระดับลม">
               <span class="wind-arrow" id="hud-wind-arrow" aria-hidden="true">➤</span>
               <span id="hud-wind-text">0.6 ม./วิ</span>
-            </div>
-            <span class="hud-fps-badge" id="hud-fps-badge" title="เฟรมเรตจริง (Frames Per Second)">60 FPS</span>
+            </button>
+            <span class="hud-fps-badge" id="hud-fps-badge" title="เฟรมเรตจริง (FPS)">60 FPS</span>
             <p id="hud-mission-desc"></p>
           </div>
 
-          <div class="hud-telemetry-strip">
-            <div class="telemetry-tile" id="hud-alt-tile" title="ความสูงเหนือพื้น/หลังคาใต้ท้องโดรน (AGL) เทียบกับความสูงจากจุดปล่อย (Barometer Home ALT) — เพดานกฎหมายไทย ≤ 90 ม.">
-              <span class="telemetry-label">ความสูง (AGL)</span>
-              <span class="telemetry-value" id="hud-alt-val">0.0 ม.</span>
-              <span class="telemetry-sub" id="hud-alt-sub">BARO · ฐาน 0.0ม.</span>
-            </div>
-            <div class="telemetry-tile sensor-tile" id="hud-sensor-tile" title="เซนเซอร์วัดระยะพื้น (Sonar / ToF) และระบบกันชน 360° LiDAR + mmWave Radar (ช่องที่ 10)">
-              <span class="telemetry-label" id="hud-sensor-label">LiDAR / Radar</span>
-              <span class="telemetry-value" id="hud-sensor-val">ไม่ได้ติด</span>
-              <span class="telemetry-sub" id="hud-sensor-sub">ติดเพิ่มที่ช่อง 10</span>
-            </div>
-            <div class="telemetry-tile">
-              <span class="telemetry-label">ความเร็ว</span>
-              <span class="telemetry-value" id="hud-speed-val">0 กม./ชม.</span>
-            </div>
-            <div class="telemetry-tile">
-              <span class="telemetry-label" id="hud-time-label">เวลาบิน</span>
-              <span class="telemetry-value" id="hud-time-val">00:00</span>
-            </div>
-            <div class="telemetry-tile">
-              <span class="telemetry-label">จุดสำรวจ</span>
-              <span class="telemetry-value" id="hud-checkpoint-val">—</span>
-            </div>
-            <div class="telemetry-tile">
-              <span class="telemetry-label">แบตเตอรี่</span>
-              <span class="telemetry-value" id="hud-bat-val">100%</span>
-              <div class="battery-bar-container">
-                <div class="battery-bar-fill" id="hud-bat-bar"></div>
+          <div class="hud-top-right-group">
+            <div class="hud-telemetry-strip">
+              <div class="telemetry-tile" id="hud-alt-tile" title="ความสูงเหนือพื้น (AGL) และเพดานบินสูงสุด (กฎหมายไทย ≤ 90 ม.)">
+                <span class="telemetry-label">AGL</span>
+                <span class="telemetry-value" id="hud-alt-val">0.0 ม.</span>
+                <span class="telemetry-sub" id="hud-alt-sub">BARO · 0.0ม</span>
+              </div>
+              <div class="telemetry-tile sensor-tile" id="hud-sensor-tile" title="เซนเซอร์วัดระยะพื้น (Sonar / ToF) และระบบกันชน 360° LiDAR + mmWave Radar">
+                <span class="telemetry-label" id="hud-sensor-label">LiDAR</span>
+                <span class="telemetry-value" id="hud-sensor-val">ไม่ได้ติด</span>
+                <span class="telemetry-sub" id="hud-sensor-sub">ช่อง 10</span>
+              </div>
+              <div class="telemetry-tile">
+                <span class="telemetry-label">ความเร็ว</span>
+                <span class="telemetry-value" id="hud-speed-val">0 กม./ชม.</span>
+              </div>
+              <div class="telemetry-tile">
+                <span class="telemetry-label" id="hud-time-label">เวลา</span>
+                <span class="telemetry-value" id="hud-time-val">00:00</span>
+              </div>
+              <div class="telemetry-tile hidden" id="hud-checkpoint-tile">
+                <span class="telemetry-label">จุดสำรวจ</span>
+                <span class="telemetry-value" id="hud-checkpoint-val">—</span>
+              </div>
+              <div class="telemetry-tile">
+                <span class="telemetry-label">แบต</span>
+                <span class="telemetry-value" id="hud-bat-val">100%</span>
+                <div class="battery-bar-container">
+                  <div class="battery-bar-fill" id="hud-bat-bar"></div>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div class="hud-actions-right">
-            <button class="btn-header-action btn-start-stop start-ready" id="btn-hud-start-stop" title="สตาร์ท / ดับมอเตอร์ หรือลงจอดอัตโนมัติ (ปุ่ม B)">▶ START</button>
-            <button class="btn-header-action btn-auto-flight" id="btn-hud-auto-takeoff" title="บินขึ้นอัตโนมัติ 3 ม. (T) / ตัดมอเตอร์ฉุกเฉินเมื่อลอยกลางอากาศ (X×2)">🛫 บินขึ้น (T)</button>
-            <button class="btn-header-action" id="btn-hud-rate-mode" title="สลับความนุ่มนวลการบังคับ: นุ่มสมดุล / นุ่มนวล Cine / สปอร์ต (ปุ่ม G)">⚖️ นุ่มสมดุล (G)</button>
-            <button class="btn-header-action" id="btn-hud-wind" title="สลับความแรงลม: ตามฉาก / ลมปานกลาง / ลมแรง / พายุลมกระโชก / ลมสงบ (ปุ่ม N)">🌬️ ลม (N)</button>
-            <button class="btn-header-action" id="btn-hud-failsafe" title="จำลองเซนเซอร์/สัญญาณขาดหายกลางทาง เพื่อให้โดรนคำนวณเส้นทาง (Breadcrumb + A*) บินกลับจุดเริ่มต้นอัตโนมัติ (ปุ่ม P)">📡 สัญญาณหาย (P)</button>
-            <button class="btn-header-action" id="btn-hud-graphics" title="สลับระดับกราฟิกเพื่อความลื่นไหล: สมดุล / ลื่นสุด (60 FPS) / คมชัด">⚖️ สมดุล</button>
-            <button class="btn-header-action" id="btn-toggle-camera" title="สลับมุมมองบุคคลที่ 1 (FPV กล้องติดโดรน) ↔ มุมมองบุคคลที่ 3 (ปุ่ม V)">📷 มุมมองที่ 3 (V)</button>
-            <button class="btn-header-action" id="btn-toggle-sound">🔊</button>
-            <button class="btn-header-action primary" id="btn-hud-land">📋 จบเที่ยวบิน</button>
-            <button class="btn-header-action" id="btn-hud-home">← หน้าแรก</button>
+            <button type="button" class="hud-finish-btn" id="btn-hud-land" title="จบเที่ยวบินและดูสรุปผล">จบเที่ยวบิน</button>
           </div>
         </div>
 
@@ -665,11 +657,48 @@
             </div>
           </div>
 
-          <div class="hud-center-pill">
-            B สตาร์ท/ดับ · T บินขึ้น · L ลงจอด · V มุมมอง · N ปรับลม · G นุ่มนวล · P สัญญาณหาย · X×2 ตัดฉุกเฉิน · W/S/A/D/Q/E · Space/Shift · H GPS · R กลับฐาน · F พ่นปุ๋ย
-          </div>
+          <!-- Compact Floating Bottom Flight Control Dock + Collapsible Popovers -->
+          <div class="hud-bottom-dock-wrap" id="hud-bottom-dock-wrap">
+            <!-- Collapsible Settings Popover (Wind, Graphics, Sound) -->
+            <div class="hud-popover hud-settings-popover hidden" id="hud-settings-popover">
+              <div class="hud-popover-title">ตั้งค่าการบิน &amp; ระบบ</div>
+              <button type="button" class="hud-popover-item" id="btn-hud-wind" title="สลับระดับความแรงลม (ปุ่ม N)">🌬️ ลม (N)</button>
+              <button type="button" class="hud-popover-item" id="btn-hud-graphics" title="สลับระดับกราฟิก: สมดุล / ลื่นสุด / คมชัด">⚖️ กราฟิก · สมดุล</button>
+              <button type="button" class="hud-popover-item" id="btn-toggle-sound" title="เปิด/ปิดเสียงจำลองการบิน">🔊 เสียงจำลอง: เปิด</button>
+            </div>
 
-          <div style="width: 140px;"></div>
+            <!-- Collapsible Keyboard Shortcut Reference Popover -->
+            <div class="hud-popover hud-keys-popover hidden" id="hud-keys-popover">
+              <div class="hud-popover-title">คีย์ลัดควบคุมการบิน (Mode 2)</div>
+              <div class="hud-keys-grid">
+                <div><kbd>B</kbd><span>สตาร์ท / ดับมอเตอร์</span></div>
+                <div><kbd>T</kbd> / <kbd>L</kbd><span>บินขึ้น / ลงจอดอัตโนมัติ</span></div>
+                <div><kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd><span>เดินหน้า–ถอย · หมุนซ้าย–ขวา</span></div>
+                <div><kbd>Q</kbd> / <kbd>E</kbd><span>เอียงซ้าย–ขวา</span></div>
+                <div><kbd>Space</kbd> / <kbd>Shift</kbd><span>เพิ่ม–ลดความสูง</span></div>
+                <div><kbd>V</kbd><span>สลับมุมกล้อง FPV / บุคคลที่ 3</span></div>
+                <div><kbd>N</kbd><span>ปรับระดับความแรงลม</span></div>
+                <div><kbd>G</kbd><span>โหมดบังคับ นุ่ม / สปอร์ต</span></div>
+                <div><kbd>H</kbd> / <kbd>R</kbd><span>GPS/ATTI · กลับจุดเริ่มต้น</span></div>
+                <div><kbd>P</kbd><span>จำลองสัญญาณหาย (Auto-Return)</span></div>
+                <div><kbd>F</kbd><span>พ่นปุ๋ย / ปลดสัมภาระ</span></div>
+                <div><kbd>X×2</kbd><span>ตัดมอเตอร์ฉุกเฉิน</span></div>
+              </div>
+            </div>
+
+            <!-- Main Minimal Floating Glass Dock -->
+            <div class="hud-floating-dock">
+              <button type="button" class="hud-dock-btn btn-start-stop start-ready" id="btn-hud-start-stop" title="สตาร์ท / ดับมอเตอร์ หรือลงจอดอัตโนมัติ (ปุ่ม B)">▶ START (B)</button>
+              <button type="button" class="hud-dock-btn btn-auto-flight" id="btn-hud-auto-takeoff" title="บินขึ้นอัตโนมัติ 3 ม. (T) / ตัดมอเตอร์ฉุกเฉิน (X×2)">🛫 บินขึ้น (T)</button>
+              <span class="hud-dock-sep" aria-hidden="true"></span>
+              <button type="button" class="hud-dock-btn" id="btn-toggle-camera" title="สลับมุมมองบุคคลที่ 1 (FPV) ↔ มุมมองบุคคลที่ 3 (ปุ่ม V)">📷 มุมมองที่ 3 (V)</button>
+              <button type="button" class="hud-dock-btn" id="btn-hud-rate-mode" title="สลับความนุ่มนวล: นุ่มสมดุล / นุ่มนวล / สปอร์ต (ปุ่ม G)">⚖️ นุ่มสมดุล (G)</button>
+              <button type="button" class="hud-dock-btn" id="btn-hud-failsafe" title="จำลองเซนเซอร์/สัญญาณขาดหายกลางทาง (ปุ่ม P)">📡 สัญญาณหาย (P)</button>
+              <span class="hud-dock-sep" aria-hidden="true"></span>
+              <button type="button" class="hud-dock-btn subtle" id="btn-hud-settings-toggle" title="ตั้งค่าความแรงลม กราฟิก และเสียง">⚙ ตั้งค่า</button>
+              <button type="button" class="hud-dock-btn subtle" id="btn-hud-keys-toggle" title="ดูคีย์ลัดควบคุมทั้งหมด">? คีย์ลัด</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -780,6 +809,6 @@
   <script src="js/learning-data.js?v=20261126h"></script>
   <script src="js/drone-model.js?v=20261126h"></script>
   <script src="js/flight-sim.js?v=20261126h"></script>
-  <script src="js/app.js?v=20261126h"></script>
+  <script src="js/app.js?v=20261126k"></script>
 </body>
 </html>

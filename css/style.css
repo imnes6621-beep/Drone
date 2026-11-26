@@ -224,7 +224,8 @@ button {
   display: block;
 }
 
-#screen-home.active {
+#screen-home.active,
+#screen-simulator.active {
   height: 100vh;
 }
 
@@ -1600,7 +1601,7 @@ button {
 .flight-sim-screen {
   position: relative;
   width: 100vw;
-  height: calc(100vh - 58px);
+  height: 100%;
 }
 
 .flight-canvas-container {
@@ -1618,31 +1619,61 @@ button {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 12px 16px 16px;
 }
 
 .flight-hud-overlay > * {
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .hud-top-bar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  pointer-events: none;
 }
 
 .hud-objective-card {
-  background: rgba(14, 16, 22, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  padding: 8px 16px;
+  pointer-events: auto;
+  background: rgba(11, 16, 27, 0.80);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 13px;
+  padding: 5px 10px 5px 6px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 7px;
+  min-width: 0;
+  flex-shrink: 1;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hud-back-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.hud-back-btn:hover {
+  background: rgba(249, 115, 22, 0.22);
+  border-color: rgba(249, 115, 22, 0.65);
+  color: #ffffff;
 }
 
 .hud-objective-card.signal-warn {
@@ -1742,7 +1773,14 @@ button {
   border: 1px solid rgba(56, 189, 248, 0.36);
   color: #7dd3fc;
   white-space: nowrap;
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.14s ease;
+}
+
+.hud-wind-pill:hover {
+  border-color: #38bdf8;
+  background: rgba(14, 42, 66, 0.96);
 }
 
 .hud-wind-pill.moderate {
@@ -1779,13 +1817,12 @@ button {
 
 .hud-fps-badge {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  color: #38bdf8;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
   white-space: nowrap;
 }
 
@@ -1793,11 +1830,14 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: #e4e4e7;
-  padding-left: 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .led-dot {
@@ -1836,62 +1876,81 @@ button {
 }
 
 .hud-objective-card h3 {
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: #ffffff;
+  white-space: nowrap;
 }
 
 .hud-objective-card p {
   display: none;
 }
 
+.hud-top-right-group {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .hud-telemetry-strip {
   display: flex;
   align-items: stretch;
-  gap: 8px;
-  margin-left: auto;
+  gap: 0;
+  background: rgba(11, 16, 27, 0.80);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 13px;
+  padding: 4px 3px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 .telemetry-tile {
-  background: rgba(14, 16, 22, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
-  padding: 6px 12px;
-  min-width: 96px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 2px 9px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  position: relative;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.telemetry-tile + .telemetry-tile:not(.hidden) {
+  border-left: 1px solid rgba(255, 255, 255, 0.10);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.telemetry-tile.hidden {
+  display: none !important;
 }
 
 .telemetry-sub {
   font-size: 9.5px;
-  font-weight: 600;
+  font-weight: 500;
   color: #94a3b8;
-  margin-top: 2px;
+  margin-top: 1px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.telemetry-tile.sensor-clear {
-  border-color: rgba(16, 185, 129, 0.45);
-}
 .telemetry-tile.sensor-clear .telemetry-value { color: #34d399; }
 
-.telemetry-tile.sensor-sonar {
-  border-color: rgba(34, 211, 238, 0.5);
-}
 .telemetry-tile.sensor-sonar .telemetry-value { color: #22d3ee; }
 
 .telemetry-tile.sensor-detect {
-  border-color: rgba(245, 158, 11, 0.8);
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.14);
 }
 .telemetry-tile.sensor-detect .telemetry-value { color: #fbbf24; }
 
 .telemetry-tile.sensor-brake {
-  border-color: rgba(255, 77, 77, 0.88);
-  box-shadow: 0 0 14px rgba(255, 77, 77, 0.42);
+  background: rgba(239, 68, 68, 0.22);
 }
 .telemetry-tile.sensor-brake .telemetry-value {
   color: #fca5a5;
@@ -1899,26 +1958,29 @@ button {
 }
 
 .telemetry-tile.alt-warn-ceiling {
-  border-color: rgba(255, 77, 77, 0.88);
-  box-shadow: 0 0 14px rgba(255, 77, 77, 0.4);
+  background: rgba(239, 68, 68, 0.22);
 }
 .telemetry-tile.alt-warn-ceiling .telemetry-value { color: #ff6b6b; }
 
 .telemetry-label {
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 500;
+  color: #94a3b8;
+  white-space: nowrap;
 }
 
 .telemetry-value {
-  font-size: 14.5px;
+  font-size: 12.8px;
   font-weight: 700;
   color: #ffffff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .battery-bar-container {
   width: 100%;
-  height: 4px;
-  background: #27272a;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 3px;
   margin-top: 3px;
   overflow: hidden;
@@ -1926,14 +1988,30 @@ button {
 
 .battery-bar-fill {
   height: 100%;
-  background: #ffffff;
+  background: #22c55e;
   width: 100%;
+  transition: width 0.2s ease, background 0.2s ease;
 }
 
-.hud-actions-right {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.hud-finish-btn {
+  padding: 9px 13px;
+  border-radius: 11px;
+  border: 1px solid rgba(253, 186, 116, 0.45);
+  background: linear-gradient(135deg, #ff8a24 0%, #ea580c 100%);
+  color: #ffffff;
+  font-family: var(--font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(249, 115, 22, 0.34);
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hud-finish-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 22px rgba(249, 115, 22, 0.48);
 }
 
 /* ========================================================
@@ -1977,16 +2055,16 @@ button {
   border-style: solid;
   border-width: 0;
 }
-.fpv-corner.tl { top: 216px; left: 28px; border-top-width: 2px; border-left-width: 2px; }
-.fpv-corner.tr { top: 216px; right: 28px; border-top-width: 2px; border-right-width: 2px; }
-.fpv-corner.bl { bottom: 68px; left: 28px; border-bottom-width: 2px; border-left-width: 2px; }
-.fpv-corner.br { bottom: 68px; right: 28px; border-bottom-width: 2px; border-right-width: 2px; }
+.fpv-corner.tl { top: 78px; left: 26px; border-top-width: 2px; border-left-width: 2px; }
+.fpv-corner.tr { top: 78px; right: 26px; border-top-width: 2px; border-right-width: 2px; }
+.fpv-corner.bl { bottom: 76px; left: 26px; border-bottom-width: 2px; border-left-width: 2px; }
+.fpv-corner.br { bottom: 76px; right: 26px; border-bottom-width: 2px; border-right-width: 2px; }
 
 /* Top-Left Camera Optics / REC Pill */
 .fpv-cam-badge {
   position: absolute;
-  top: 224px;
-  left: 42px;
+  top: 86px;
+  left: 40px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2021,8 +2099,8 @@ button {
 
 .fpv-tilt-badge {
   position: absolute;
-  top: 224px;
-  right: 42px;
+  top: 86px;
+  right: 40px;
   display: inline-flex;
   align-items: center;
   padding: 5px 12px;
@@ -2041,7 +2119,7 @@ button {
 /* Top-Center Compass & Home Return Arrow */
 .fpv-compass-bar {
   position: absolute;
-  top: 220px;
+  top: 82px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2296,7 +2374,7 @@ button {
 /* Bottom Avionics Telemetry & LiDAR Warning Strip */
 .fpv-bottom-avionics {
   position: absolute;
-  bottom: 72px;
+  bottom: 76px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2330,24 +2408,29 @@ button {
   color: #fecaca;
 }
 
-/* Bottom RC Transmitter Widget (Match step_26) */
+/* Bottom RC Transmitter Widget & Minimal Floating Flight Dock */
 .hud-bottom-bar {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: flex-end;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
+  pointer-events: none;
 }
 
 .flight-controller-osd {
-  background: rgba(22, 26, 36, 0.92);
+  pointer-events: auto;
+  background: rgba(15, 19, 29, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 16px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 280px;
+  width: 274px;
+  flex-shrink: 0;
 }
 
 .rc-top-row {
@@ -2459,13 +2542,202 @@ button {
   color: #140700;
 }
 
-.hud-center-pill {
-  background: rgba(14, 16, 22, 0.86);
+/* Clean Floating Bottom Control Dock & Popovers */
+.hud-bottom-dock-wrap {
+  position: relative;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto;
+}
+
+.hud-floating-dock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(11, 16, 27, 0.84);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.hud-dock-sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 2px;
+}
+
+.hud-dock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-pill);
-  padding: 8px 18px;
+  color: #f1f5f9;
+  font-family: var(--font);
   font-size: 12px;
-  color: #d4d4d8;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.14s ease;
+}
+
+.hud-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+.hud-dock-btn.subtle {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.11);
+  color: #cbd5e1;
+}
+
+.hud-dock-btn.primary,
+.hud-dock-btn.popover-open {
+  background: rgba(249, 115, 22, 0.22);
+  border-color: rgba(249, 115, 22, 0.68);
+  color: #fed7aa;
+}
+
+.hud-dock-btn.danger-kill {
+  background: rgba(239, 68, 68, 0.24) !important;
+  border-color: rgba(248, 113, 113, 0.78) !important;
+  color: #fecaca !important;
+}
+
+.hud-dock-btn.danger-kill:hover {
+  background: rgba(239, 68, 68, 0.42) !important;
+  color: #ffffff !important;
+}
+
+/* Floating Glass Popovers (Settings & Keybinds) */
+.hud-popover {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  right: 0;
+  min-width: 245px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(11, 16, 27, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.58);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 30;
+}
+
+.hud-popover.hidden {
+  display: none;
+}
+
+.hud-popover-title {
+  font-family: var(--font-heading);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.hud-popover-item {
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.hud-popover-item:hover {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #ffffff;
+}
+
+.hud-popover-item.primary {
+  background: rgba(249, 115, 22, 0.2);
+  border-color: rgba(249, 115, 22, 0.65);
+  color: #fed7aa;
+}
+
+.hud-keys-popover {
+  min-width: 440px;
+  max-width: min(92vw, 500px);
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.hud-keys-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+}
+
+.hud-keys-grid > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.8px;
+  color: #cbd5e1;
+}
+
+.hud-keys-grid kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f8fafc;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .hud-fps-badge {
+    display: none;
+  }
+  .hud-signal-pill,
+  .hud-wind-pill {
+    padding: 2px 7px;
+    font-size: 10.5px;
+  }
+  .hud-objective-card h3 {
+    font-size: 12.2px;
+  }
+  .drone-led-indicator {
+    font-size: 11.2px;
+    padding-left: 7px;
+    gap: 5px;
+  }
+}
+
+@media (max-width: 880px) {
+  .hud-top-bar {
+    flex-wrap: wrap;
+  }
 }
 
 /* ========================================================
